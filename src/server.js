@@ -53,11 +53,13 @@ io.on('connection', (socket) => {
 // Middleware
 app.use(
   cors({
-    origin: [
-      process.env.CLIENT_URL || 'http://localhost:3000',
-      'http://localhost:3001',
-    ],
+    origin: (origin, callback) => {
+      // Allow all origins (Vercel, Render, Localhost, Custom Domain)
+      callback(null, true);
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   })
 );
 app.use(express.json({ limit: '10mb' }));
@@ -65,6 +67,37 @@ app.use(express.urlencoded({ extended: true }));
 
 // Connect to DB
 connectDB();
+
+// Root Welcome Endpoint
+app.get('/', (req, res) => {
+  const { isConnected, isMockMode } = getDBStatus();
+  res.json({
+    success: true,
+    message: 'Personal Care BD API is running smoothly',
+    status: 'online',
+    environment: process.env.NODE_ENV || 'production',
+    database: isConnected ? 'connected' : isMockMode ? 'mock-mode' : 'disconnected',
+    socketConnections: io.engine ? io.engine.clientsCount : 0,
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      orders: '/api/orders',
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/api', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Personal Care BD API Root',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      orders: '/api/orders',
+    },
+  });
+});
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
