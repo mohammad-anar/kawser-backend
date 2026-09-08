@@ -5,6 +5,7 @@ const cors = require('cors');
 const { Server } = require('socket.io');
 const { connectDB, getDBStatus } = require('./config/db');
 const { initKeepAlive } = require('./cron/keepAlive');
+const seedAdmin = require('./seed/seedAdmin');
 
 const app = express();
 const server = http.createServer(app);
@@ -65,8 +66,13 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Connect to DB
-connectDB();
+// Connect to DB, then auto-seed admin
+connectDB().then(() => {
+  const { isConnected } = getDBStatus();
+  if (isConnected) {
+    seedAdmin();
+  }
+});
 
 // Root Welcome Endpoint
 app.get('/', (req, res) => {

@@ -35,6 +35,26 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    // --- OTP fields for password reset / change ---
+    passwordResetOtp: {
+      type: String,
+      select: false,
+    },
+    passwordResetOtpExpiry: {
+      type: Date,
+      select: false,
+    },
+    otpVerified: {
+      type: Boolean,
+      default: false,
+      select: false,
+    },
+    // Short-lived reset token fingerprint (to invalidate after single use)
+    passwordResetTokenId: {
+      type: String,
+      select: false,
+    },
   },
   {
     timestamps: true,

@@ -30,10 +30,12 @@ const orderSchema = new mongoose.Schema(
     },
     district: {
       type: String,
+      trim: true,
       default: '',
     },
     thana: {
       type: String,
+      trim: true,
       default: '',
     },
     gpsCoordinates: {
@@ -42,7 +44,7 @@ const orderSchema = new mongoose.Schema(
     },
     productName: {
       type: String,
-      default: 'Top Notch Magic Condom (China)',
+      default: 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম (Top Notch Reusable)',
     },
     quantity: {
       type: Number,
@@ -51,8 +53,8 @@ const orderSchema = new mongoose.Schema(
     },
     size: {
       type: String,
-      default: '',
       trim: true,
+      default: 'স্ট্যান্ডার্ড',
     },
     unitPrice: {
       type: Number,
@@ -108,8 +110,8 @@ orderSchema.pre('save', async function (next) {
     this.orderId = `PC-${String(count + 1001).padStart(4, '0')}`;
   }
   // Record initial status in history
-  if (this.isNew) {
-    this.statusHistory.push({ status: this.status });
+  if (this.isNew && this.statusHistory.length === 0) {
+    this.statusHistory.push({ status: this.status, changedBy: 'customer' });
   }
   next();
 });
