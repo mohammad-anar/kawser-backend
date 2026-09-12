@@ -79,6 +79,7 @@ const createOrder = async (req, res) => {
       size,
       orderNotes,
       userId,
+      productName,
     } = req.body;
 
     if (!customerName || !phoneNumber || !address) {
@@ -115,7 +116,7 @@ const createOrder = async (req, res) => {
       gpsCoordinates: (gpsCoordinates && gpsCoordinates.lat && gpsCoordinates.lng)
         ? { lat: Number(gpsCoordinates.lat), lng: Number(gpsCoordinates.lng) }
         : { lat: null, lng: null },
-      productName: 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম (Top Notch Reusable)',
+      productName: (productName && productName.trim()) ? productName.trim() : 'Love Lock Condom / Magic Condom',
       quantity: qty,
       size: size ? String(size).trim() : 'স্ট্যান্ডার্ড',
       unitPrice,
@@ -164,6 +165,7 @@ const createOrder = async (req, res) => {
       message: 'আপনার অর্ডার সফলভাবে গ্রহণ করা হয়েছে! শীঘ্রই আমাদের টিম যোগাযোগ করবে।',
       orderId: order.orderId,
       totalPrice: order.totalPrice,
+      productName: order.productName,
       estimatedDelivery: 'ঢাকায় ১ দিন, ঢাকার বাইরে ২-৩ দিন',
     });
   } catch (err) {
