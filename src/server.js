@@ -66,11 +66,24 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Connect to DB, then auto-seed admin
-connectDB().then(() => {
+const Order = require('./models/Order');
+
+// Connect to DB, then auto-seed admin and ensure order schema compatibility
+connectDB().then(async () => {
   const { isConnected } = getDBStatus();
   if (isConnected) {
     seedAdmin();
+    try {
+      const res = await Order.updateMany(
+        { isDeleted: { $exists: false } },
+        { $set: { isDeleted: false, deletedAt: null } }
+      );
+      if (res.modifiedCount > 0) {
+        console.log(`[Order Schema Sync] Updated ${res.modifiedCount} legacy orders with isDeleted: false`);
+      }
+    } catch (e) {
+      console.warn('[Order Schema Sync] Non-critical warning:', e.message);
+    }
   }
 });
 

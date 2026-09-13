@@ -241,7 +241,7 @@ const getAllOrders = async (req, res) => {
     const isDeletedQuery = isDeleted === 'true';
 
     if (getDBStatus().isConnected) {
-      const query = { isDeleted: isDeletedQuery };
+      const query = isDeletedQuery ? { isDeleted: true } : { isDeleted: { $ne: true } };
       if (status && status !== 'all') query.status = status;
       if (phone) {
         query.phoneNumber = { $regex: phone.trim(), $options: 'i' };
