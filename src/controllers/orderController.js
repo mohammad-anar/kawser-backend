@@ -235,48 +235,69 @@ const getMyOrders = async (req, res) => {
 // GET /api/admin/orders
 const getAllOrders = async (req, res) => {
   try {
-    const { status, search, page = 1, limit = 50 } = req.query;
+    const { status, search, phone, isDeleted, page = 1, limit = 10 } = req.query;
+    const parsedPage = Math.max(1, parseInt(page) || 1);
+    const parsedLimit = Math.max(1, parseInt(limit) || 10);
+    const isDeletedQuery = isDeleted === 'true';
 
     if (getDBStatus().isConnected) {
-      const query = {};
+      const query = { isDeleted: isDeletedQuery };
       if (status && status !== 'all') query.status = status;
+      if (phone) {
+        query.phoneNumber = { $regex: phone.trim(), $options: 'i' };
+      }
       if (search) {
         query.$or = [
-          { orderId: { $regex: search, $options: 'i' } },
-          { customerName: { $regex: search, $options: 'i' } },
-          { phoneNumber: { $regex: search, $options: 'i' } },
+          { orderId: { $regex: search.trim(), $options: 'i' } },
+          { customerName: { $regex: search.trim(), $options: 'i' } },
+          { phoneNumber: { $regex: search.trim(), $options: 'i' } },
         ];
       }
 
-      const skip = (parseInt(page) - 1) * parseInt(limit);
+      const skip = (parsedPage - 1) * parsedLimit;
       const [orders, total] = await Promise.all([
-        Order.find(query).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
+        Order.find(query).sort({ createdAt: -1 }).skip(skip).limit(parsedLimit),
         Order.countDocuments(query),
       ]);
 
-      return res.json({ success: true, orders, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
+      return res.json({
+        success: true,
+        orders,
+        total,
+        page: parsedPage,
+        pages: Math.ceil(total / parsedLimit) || 1,
+      });
     }
 
     // Mock fallback
-    let filtered = [...mockOrders];
+    let filtered = mockOrders.filter((o) => (isDeletedQuery ? o.isDeleted === true : !o.isDeleted));
     if (status && status !== 'all') {
       filtered = filtered.filter((o) => o.status === status);
     }
+    if (phone) {
+      filtered = filtered.filter((o) => o.phoneNumber && o.phoneNumber.includes(phone.trim()));
+    }
     if (search) {
-      const q = search.toLowerCase();
+      const q = search.toLowerCase().trim();
       filtered = filtered.filter(
         (o) =>
           o.orderId.toLowerCase().includes(q) ||
           o.customerName.toLowerCase().includes(q) ||
-          o.phoneNumber.includes(q)
+          (o.phoneNumber && o.phoneNumber.includes(q))
       );
     }
 
     const total = filtered.length;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const orders = filtered.slice(skip, skip + parseInt(limit));
+    const skip = (parsedPage - 1) * parsedLimit;
+    const orders = filtered.slice(skip, skip + parsedLimit);
 
-    res.json({ success: true, orders, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
+    res.json({
+      success: true,
+      orders,
+      total,
+      page: parsedPage,
+      pages: Math.ceil(total / parsedLimit) || 1,
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
   }
@@ -313,6 +334,196 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
+// PUT /api/admin/orders/:id - Update full order details
+const updateOrder = async (req, res) => {
+  try {
+    const {
+      customerName,
+      phoneNumber,
+      email,
+      address,
+      district,
+      thana,
+      productName,
+      quantity,
+      size,
+      unitPrice,
+      deliveryCharge,
+      totalPrice,
+      paymentMethod,
+      status,
+      orderNotes,
+    } = req.body;
+
+    const validStatuses = ['Pending', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
+    }
+
+    if (getDBStatus().isConnected) {
+      const order = await Order.findById(req.params.id);
+      if (!order) return res.status(404).json({ success: false, message: 'অর্ডার পাওয়া যায়নি।' });
+
+      if (customerName !== undefined) order.customerName = customerName.trim();
+      if (phoneNumber !== undefined) order.phoneNumber = phoneNumber.trim();
+      if (email !== undefined) order.email = email.trim();
+      if (address !== undefined) order.address = address.trim();
+      if (district !== undefined) order.district = district.trim();
+      if (thana !== undefined) order.thana = thana.trim();
+      if (productName !== undefined) order.productName = productName.trim();
+      if (quantity !== undefined) order.quantity = Number(quantity) || 1;
+      if (size !== undefined) order.size = size;
+      if (unitPrice !== undefined) order.unitPrice = Number(unitPrice);
+      if (deliveryCharge !== undefined) order.deliveryCharge = Number(deliveryCharge);
+
+      if (totalPrice !== undefined && totalPrice !== null) {
+        order.totalPrice = Number(totalPrice);
+      } else if (quantity !== undefined || unitPrice !== undefined || deliveryCharge !== undefined) {
+        const uPrice = unitPrice !== undefined ? Number(unitPrice) : (order.unitPrice || 899);
+        const qty = quantity !== undefined ? Number(quantity) : (order.quantity || 1);
+        const dCharge = deliveryCharge !== undefined ? Number(deliveryCharge) : (order.deliveryCharge || 0);
+        order.totalPrice = (uPrice * qty) + dCharge;
+      }
+
+      if (paymentMethod !== undefined) order.paymentMethod = paymentMethod;
+      if (orderNotes !== undefined) order.orderNotes = orderNotes;
+
+      if (status && status !== order.status) {
+        order.status = status;
+        order.statusHistory.push({
+          status,
+          changedBy: req.user?.id || 'admin',
+          changedAt: new Date(),
+        });
+      }
+
+      await order.save();
+      return res.json({ success: true, message: 'অর্ডার সফলভাবে আপডেট করা হয়েছে।', order });
+    }
+
+    // Mock fallback
+    const orderIndex = mockOrders.findIndex((o) => o._id === req.params.id || o.orderId === req.params.id);
+    if (orderIndex === -1) {
+      return res.status(404).json({ success: false, message: 'অর্ডার পাওয়া যায়নি।' });
+    }
+
+    const order = mockOrders[orderIndex];
+    if (customerName !== undefined) order.customerName = customerName.trim();
+    if (phoneNumber !== undefined) order.phoneNumber = phoneNumber.trim();
+    if (email !== undefined) order.email = email.trim();
+    if (address !== undefined) order.address = address.trim();
+    if (district !== undefined) order.district = district.trim();
+    if (thana !== undefined) order.thana = thana.trim();
+    if (productName !== undefined) order.productName = productName.trim();
+    if (quantity !== undefined) order.quantity = Number(quantity) || 1;
+    if (size !== undefined) order.size = size;
+    if (unitPrice !== undefined) order.unitPrice = Number(unitPrice);
+    if (deliveryCharge !== undefined) order.deliveryCharge = Number(deliveryCharge);
+
+    if (totalPrice !== undefined && totalPrice !== null) {
+      order.totalPrice = Number(totalPrice);
+    } else if (quantity !== undefined || unitPrice !== undefined || deliveryCharge !== undefined) {
+      const uPrice = unitPrice !== undefined ? Number(unitPrice) : (order.unitPrice || 899);
+      const qty = quantity !== undefined ? Number(quantity) : (order.quantity || 1);
+      const dCharge = deliveryCharge !== undefined ? Number(deliveryCharge) : (order.deliveryCharge || 0);
+      order.totalPrice = (uPrice * qty) + dCharge;
+    }
+
+    if (paymentMethod !== undefined) order.paymentMethod = paymentMethod;
+    if (orderNotes !== undefined) order.orderNotes = orderNotes;
+
+    if (status && status !== order.status) {
+      order.status = status;
+      if (!order.statusHistory) order.statusHistory = [];
+      order.statusHistory.push({
+        status,
+        changedBy: 'admin',
+        timestamp: new Date(),
+      });
+    }
+
+    mockOrders[orderIndex] = order;
+    return res.json({ success: true, message: 'অর্ডার সফলভাবে আপডেট করা হয়েছে।', order });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// DELETE /api/admin/orders/:id - Soft delete order
+const softDeleteOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (getDBStatus().isConnected) {
+      const order = await Order.findById(id);
+      if (!order) return res.status(404).json({ success: false, message: 'অর্ডার পাওয়া যায়নি।' });
+      order.isDeleted = true;
+      order.deletedAt = new Date();
+      order.statusHistory.push({
+        status: 'Deleted',
+        changedBy: req.user?.id || 'admin',
+        changedAt: new Date(),
+      });
+      await order.save();
+      return res.json({ success: true, message: 'অর্ডারটি সফলভাবে ট্র্যাশে সরানো হয়েছে।' });
+    }
+
+    const order = mockOrders.find((o) => o._id === id || o.orderId === id);
+    if (!order) return res.status(404).json({ success: false, message: 'অর্ডার পাওয়া যায়নি।' });
+    order.isDeleted = true;
+    order.deletedAt = new Date();
+    res.json({ success: true, message: 'অর্ডারটি সফলভাবে ট্র্যাশে সরানো হয়েছে।' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// PATCH /api/admin/orders/:id/restore - Restore soft-deleted order
+const restoreOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (getDBStatus().isConnected) {
+      const order = await Order.findById(id);
+      if (!order) return res.status(404).json({ success: false, message: 'অর্ডার পাওয়া যায়নি।' });
+      order.isDeleted = false;
+      order.deletedAt = null;
+      order.statusHistory.push({
+        status: 'Restored',
+        changedBy: req.user?.id || 'admin',
+        changedAt: new Date(),
+      });
+      await order.save();
+      return res.json({ success: true, message: 'অর্ডারটি সফলভাবে পুনরুদ্ধার করা হয়েছে।' });
+    }
+
+    const order = mockOrders.find((o) => o._id === id || o.orderId === id);
+    if (!order) return res.status(404).json({ success: false, message: 'অর্ডার পাওয়া যায়নি।' });
+    order.isDeleted = false;
+    order.deletedAt = null;
+    res.json({ success: true, message: 'অর্ডারটি সফলভাবে পুনরুদ্ধার করা হয়েছে।' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// DELETE /api/admin/orders/:id/permanent - Permanent hard delete order
+const permanentDeleteOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (getDBStatus().isConnected) {
+      const order = await Order.findByIdAndDelete(id);
+      if (!order) return res.status(404).json({ success: false, message: 'অর্ডার পাওয়া যায়নি।' });
+      return res.json({ success: true, message: 'অর্ডারটি স্থায়ীভাবে মুছে ফেলা হয়েছে।' });
+    }
+
+    const idx = mockOrders.findIndex((o) => o._id === id || o.orderId === id);
+    if (idx === -1) return res.status(404).json({ success: false, message: 'অর্ডার পাওয়া যায়নি।' });
+    mockOrders.splice(idx, 1);
+    res.json({ success: true, message: 'অর্ডারটি স্থায়ীভাবে মুছে ফেলা হয়েছে।' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
 // GET /api/admin/orders/stats
 const getOrderStats = async (req, res) => {
   try {
@@ -339,13 +550,16 @@ const getOrderStats = async (req, res) => {
         uniquePhones,
         recentDailyOrders,
       ] = await Promise.all([
-        Order.countDocuments(),
-        Order.countDocuments({ status: 'Delivered' }),
-        Order.countDocuments({ status: 'Pending' }),
-        Order.aggregate([{ $group: { _id: null, total: { $sum: '$totalPrice' } } }]),
-        Order.distinct('phoneNumber'),
+        Order.countDocuments({ isDeleted: { $ne: true } }),
+        Order.countDocuments({ status: 'Delivered', isDeleted: { $ne: true } }),
+        Order.countDocuments({ status: 'Pending', isDeleted: { $ne: true } }),
         Order.aggregate([
-          { $match: { createdAt: { $gte: sevenDaysAgo } } },
+          { $match: { isDeleted: { $ne: true } } },
+          { $group: { _id: null, total: { $sum: '$totalPrice' } } },
+        ]),
+        Order.distinct('phoneNumber', { isDeleted: { $ne: true } }),
+        Order.aggregate([
+          { $match: { createdAt: { $gte: sevenDaysAgo }, isDeleted: { $ne: true } } },
           {
             $group: {
               _id: {
@@ -386,17 +600,18 @@ const getOrderStats = async (req, res) => {
     }
 
     // Mock stats calculation
-    const totalOrders = mockOrders.length;
-    const deliveredOrders = mockOrders.filter((o) => o.status === 'Delivered').length;
-    const pendingOrders = mockOrders.filter((o) => o.status === 'Pending').length;
-    const totalRevenue = mockOrders.reduce((sum, o) => sum + (o.totalPrice || 0), 0);
-    const uniquePhones = new Set(mockOrders.map((o) => o.phoneNumber)).size;
+    const activeMockOrders = mockOrders.filter((o) => !o.isDeleted);
+    const totalOrders = activeMockOrders.length;
+    const deliveredOrders = activeMockOrders.filter((o) => o.status === 'Delivered').length;
+    const pendingOrders = activeMockOrders.filter((o) => o.status === 'Pending').length;
+    const totalRevenue = activeMockOrders.reduce((sum, o) => sum + (o.totalPrice || 0), 0);
+    const uniquePhones = new Set(activeMockOrders.map((o) => o.phoneNumber)).size;
 
     const dailyTrend = [];
     for (let i = 6; i >= 0; i--) {
       const targetDate = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
       const dateStr = formatBDDate(targetDate);
-      const ordersOnDay = mockOrders.filter((o) => formatBDDate(o.createdAt) === dateStr);
+      const ordersOnDay = activeMockOrders.filter((o) => formatBDDate(o.createdAt) === dateStr);
       dailyTrend.push({
         date: dateStr,
         count: ordersOnDay.length,
@@ -428,19 +643,26 @@ const exportOrdersCSV = async (req, res) => {
     let orders = [];
 
     if (getDBStatus().isConnected) {
-      let query = {};
+      let query = { isDeleted: { $ne: true } };
       if (ids && ids.length > 0) {
         const validObjectIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
-        query.$or = [
-          { _id: { $in: validObjectIds } },
-          { orderId: { $in: ids } },
-        ];
+        query = {
+          $and: [
+            { isDeleted: { $ne: true } },
+            {
+              $or: [
+                { _id: { $in: validObjectIds } },
+                { orderId: { $in: ids } },
+              ],
+            },
+          ],
+        };
       } else if (status && status !== 'all') {
         query.status = status;
       }
       orders = await Order.find(query).sort({ createdAt: -1 }).lean();
     } else {
-      orders = [...mockOrders];
+      orders = mockOrders.filter((o) => !o.isDeleted);
       if (ids && ids.length > 0) {
         orders = orders.filter((o) => ids.includes(o._id) || ids.includes(o.orderId));
       } else if (status && status !== 'all') {
@@ -486,6 +708,10 @@ module.exports = {
   getMyOrders,
   getAllOrders,
   updateOrderStatus,
+  updateOrder,
+  softDeleteOrder,
+  restoreOrder,
+  permanentDeleteOrder,
   getOrderStats,
   exportOrdersCSV,
 };
