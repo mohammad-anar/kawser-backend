@@ -546,6 +546,7 @@ const getOrderStats = async (req, res) => {
         totalOrders,
         deliveredOrders,
         pendingOrders,
+        cancelledOrders,
         totalRevenueResult,
         uniquePhones,
         recentDailyOrders,
@@ -553,13 +554,14 @@ const getOrderStats = async (req, res) => {
         Order.countDocuments({ isDeleted: { $ne: true } }),
         Order.countDocuments({ status: 'Delivered', isDeleted: { $ne: true } }),
         Order.countDocuments({ status: 'Pending', isDeleted: { $ne: true } }),
+        Order.countDocuments({ status: 'Cancelled', isDeleted: { $ne: true } }),
         Order.aggregate([
-          { $match: { isDeleted: { $ne: true } } },
+          { $match: { status: 'Delivered', isDeleted: { $ne: true } } },
           { $group: { _id: null, total: { $sum: '$totalPrice' } } },
         ]),
-        Order.distinct('phoneNumber', { isDeleted: { $ne: true } }),
+        Order.distinct('phoneNumber', { status: 'Delivered', isDeleted: { $ne: true } }),
         Order.aggregate([
-          { $match: { createdAt: { $gte: sevenDaysAgo }, isDeleted: { $ne: true } } },
+          { $match: { status: 'Delivered', createdAt: { $gte: sevenDaysAgo }, isDeleted: { $ne: true } } },
           {
             $group: {
               _id: {
@@ -591,6 +593,7 @@ const getOrderStats = async (req, res) => {
           totalOrders,
           deliveredOrders,
           pendingOrders,
+          cancelledOrders,
           uniqueCustomers: uniquePhones.length,
           totalRevenue: totalRevenueResult[0]?.total || 0,
           deliveryRate: totalOrders > 0 ? Math.round((deliveredOrders / totalOrders) * 100) : 0,
@@ -601,17 +604,19 @@ const getOrderStats = async (req, res) => {
 
     // Mock stats calculation
     const activeMockOrders = mockOrders.filter((o) => !o.isDeleted);
+    const deliveredMockOrders = activeMockOrders.filter((o) => o.status === 'Delivered');
     const totalOrders = activeMockOrders.length;
-    const deliveredOrders = activeMockOrders.filter((o) => o.status === 'Delivered').length;
+    const deliveredOrders = deliveredMockOrders.length;
     const pendingOrders = activeMockOrders.filter((o) => o.status === 'Pending').length;
-    const totalRevenue = activeMockOrders.reduce((sum, o) => sum + (o.totalPrice || 0), 0);
-    const uniquePhones = new Set(activeMockOrders.map((o) => o.phoneNumber)).size;
+    const cancelledOrders = activeMockOrders.filter((o) => o.status === 'Cancelled').length;
+    const totalRevenue = deliveredMockOrders.reduce((sum, o) => sum + (o.totalPrice || 0), 0);
+    const uniquePhones = new Set(deliveredMockOrders.map((o) => o.phoneNumber)).size;
 
     const dailyTrend = [];
     for (let i = 6; i >= 0; i--) {
       const targetDate = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
       const dateStr = formatBDDate(targetDate);
-      const ordersOnDay = activeMockOrders.filter((o) => formatBDDate(o.createdAt) === dateStr);
+      const ordersOnDay = deliveredMockOrders.filter((o) => formatBDDate(o.createdAt) === dateStr);
       dailyTrend.push({
         date: dateStr,
         count: ordersOnDay.length,
@@ -625,6 +630,7 @@ const getOrderStats = async (req, res) => {
         totalOrders,
         deliveredOrders,
         pendingOrders,
+        cancelledOrders,
         uniqueCustomers: uniquePhones,
         totalRevenue,
         deliveryRate: totalOrders > 0 ? Math.round((deliveredOrders / totalOrders) * 100) : 0,
