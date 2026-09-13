@@ -1,6 +1,6 @@
 const Order = require('../models/Order');
 const { getDBStatus } = require('../config/db');
-const { Parser } = require('json2csv');
+const XLSX = require('xlsx');
 
 // In-memory orders store fallback when MongoDB is offline
 const mockOrders = [
@@ -636,19 +636,21 @@ const getOrderStats = async (req, res) => {
   }
 };
 
-// POST /api/admin/orders/export - Export CSV
-const exportOrdersCSV = async (req, res) => {
+// POST /api/admin/orders/export - Export Excel (.xlsx) / Google Sheets format
+const exportOrdersExcel = async (req, res) => {
   try {
-    const { ids, status } = req.body;
+    const { ids, status, isDeleted } = req.body;
     let orders = [];
 
+    const isDeletedFilter = isDeleted === true ? true : { $ne: true };
+
     if (getDBStatus().isConnected) {
-      let query = { isDeleted: { $ne: true } };
+      let query = { isDeleted: isDeletedFilter };
       if (ids && ids.length > 0) {
         const validObjectIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
         query = {
           $and: [
-            { isDeleted: { $ne: true } },
+            { isDeleted: isDeletedFilter },
             {
               $or: [
                 { _id: { $in: validObjectIds } },
@@ -662,7 +664,7 @@ const exportOrdersCSV = async (req, res) => {
       }
       orders = await Order.find(query).sort({ createdAt: -1 }).lean();
     } else {
-      orders = mockOrders.filter((o) => !o.isDeleted);
+      orders = mockOrders.filter((o) => (isDeleted === true ? o.isDeleted === true : !o.isDeleted));
       if (ids && ids.length > 0) {
         orders = orders.filter((o) => ids.includes(o._id) || ids.includes(o.orderId));
       } else if (status && status !== 'all') {
@@ -670,35 +672,60 @@ const exportOrdersCSV = async (req, res) => {
       }
     }
 
-    const fields = [
-      { label: 'Order ID', value: 'orderId' },
-      { label: 'Customer Name', value: 'customerName' },
-      { label: 'Phone', value: 'phoneNumber' },
-      { label: 'Email', value: 'email' },
-      { label: 'Address', value: 'address' },
-      { label: 'District', value: 'district' },
-      { label: 'GPS Lat', value: 'gpsCoordinates.lat' },
-      { label: 'GPS Lng', value: 'gpsCoordinates.lng' },
-      { label: 'Product', value: 'productName' },
-      { label: 'Quantity', value: 'quantity' },
-      { label: 'Size', value: 'size' },
-      { label: 'Unit Price (BDT)', value: 'unitPrice' },
-      { label: 'Total Price (BDT)', value: 'totalPrice' },
-      { label: 'Delivery Charge', value: 'deliveryCharge' },
-      { label: 'Payment Method', value: 'paymentMethod' },
-      { label: 'Status', value: 'status' },
-      { label: 'Order Notes', value: 'orderNotes' },
-      { label: 'Order Date', value: (row) => new Date(row.createdAt).toLocaleString('en-BD') },
+    const excelRows = orders.map((o) => ({
+      'অর্ডার আইডি (Order ID)': o.orderId || '',
+      'অর্ডারের তারিখ (Date)': o.createdAt ? new Date(o.createdAt).toLocaleString('bn-BD') : '',
+      'গ্রাহকের নাম (Customer)': o.customerName || '',
+      'মোবাইল নম্বর (Phone)': o.phoneNumber || '',
+      'ইমেইল (Email)': o.email || '',
+      'ঠিকানা (Address)': o.address || '',
+      'জেলা (District)': o.district || '',
+      'থানা (Thana)': o.thana || '',
+      'পণ্য (Product)': o.productName || 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম',
+      'পরিমাণ (Quantity)': o.quantity || 1,
+      'সাইজ (Size)': o.size || 'স্ট্যান্ডার্ড',
+      'প্রতিটির মূল্য (Unit Price)': o.unitPrice || 899,
+      'ডেলিভারি চার্জ (Delivery)': o.deliveryCharge || 0,
+      'সর্বমোট মূল্য (Total)': o.totalPrice || 899,
+      'পেমেন্ট মেথড (Payment)': o.paymentMethod || 'Cash on Delivery',
+      'স্ট্যাটাস (Status)': o.status || 'Pending',
+      'নোট (Notes)': o.orderNotes || '',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(excelRows);
+
+    // Set practical column widths for optimal reading in Excel & Google Sheets
+    worksheet['!cols'] = [
+      { wch: 15 }, // Order ID
+      { wch: 24 }, // Date
+      { wch: 22 }, // Customer Name
+      { wch: 18 }, // Phone
+      { wch: 25 }, // Email
+      { wch: 40 }, // Address
+      { wch: 16 }, // District
+      { wch: 16 }, // Thana
+      { wch: 38 }, // Product
+      { wch: 12 }, // Quantity
+      { wch: 18 }, // Size
+      { wch: 18 }, // Unit Price
+      { wch: 18 }, // Delivery Charge
+      { wch: 18 }, // Total Price
+      { wch: 22 }, // Payment Method
+      { wch: 14 }, // Status
+      { wch: 30 }, // Notes
     ];
 
-    const parser = new Parser({ fields });
-    const csv = parser.parse(orders);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Orders');
 
-    res.header('Content-Type', 'text/csv; charset=utf-8');
-    res.header('Content-Disposition', `attachment; filename="orders-${Date.now()}.csv"`);
-    res.send('\uFEFF' + csv); // BOM for Excel compatibility with Bangla text
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="orders-${Date.now()}.xlsx"`);
+    res.send(buffer);
   } catch (err) {
-    res.status(500).json({ success: false, message: 'CSV এক্সপোর্ট ব্যর্থ।', error: err.message });
+    console.error('[exportOrdersExcel Error]', err);
+    res.status(500).json({ success: false, message: 'Excel এক্সপোর্ট ব্যর্থ হয়েছে।', error: err.message });
   }
 };
 
@@ -713,5 +740,6 @@ module.exports = {
   restoreOrder,
   permanentDeleteOrder,
   getOrderStats,
-  exportOrdersCSV,
+  exportOrdersExcel,
+  exportOrdersCSV: exportOrdersExcel,
 };

@@ -11,6 +11,7 @@ const {
   restoreOrder,
   permanentDeleteOrder,
   getOrderStats,
+  exportOrdersExcel,
   exportOrdersCSV,
 } = require('../controllers/orderController');
 const { protect, adminOnly } = require('../middleware/auth');
@@ -30,6 +31,6 @@ router.put('/admin/:id', protect, adminOnly, updateOrder);
 router.delete('/admin/:id/permanent', protect, adminOnly, permanentDeleteOrder);
 router.patch('/admin/:id/restore', protect, adminOnly, restoreOrder);
 router.delete('/admin/:id', protect, adminOnly, softDeleteOrder);
-router.post('/admin/export', protect, adminOnly, exportOrdersCSV);
+router.post('/admin/export', protect, adminOnly, exportOrdersExcel);
 
 module.exports = router;
