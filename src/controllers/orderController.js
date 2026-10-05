@@ -307,7 +307,7 @@ const getAllOrders = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['Pending', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
+    const validStatuses = ['Pending', 'Confirmed', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
     }
@@ -355,7 +355,7 @@ const updateOrder = async (req, res) => {
       orderNotes,
     } = req.body;
 
-    const validStatuses = ['Pending', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
+    const validStatuses = ['Pending', 'Confirmed', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
     if (status && !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
     }
