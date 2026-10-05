@@ -58,7 +58,7 @@ const orderSchema = new mongoose.Schema(
     },
     unitPrice: {
       type: Number,
-      default: 899,
+      default: 950,
     },
     deliveryCharge: {
       type: Number,

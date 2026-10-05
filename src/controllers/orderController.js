@@ -17,9 +17,9 @@ const mockOrders = [
     productName: 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম (Top Notch Reusable)',
     quantity: 1,
     size: 'মিডিয়াম (52mm)',
-    unitPrice: 899,
+    unitPrice: 950,
     deliveryCharge: 0,
-    totalPrice: 899,
+    totalPrice: 950,
     status: 'Confirmed',
     paymentMethod: 'Cash on Delivery',
     isGuestOrder: true,
@@ -42,9 +42,9 @@ const mockOrders = [
     productName: 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম (Top Notch Reusable)',
     quantity: 2,
     size: 'লার্জ (56mm)',
-    unitPrice: 899,
+    unitPrice: 950,
     deliveryCharge: 0,
-    totalPrice: 1798,
+    totalPrice: 1900,
     status: 'Processing',
     paymentMethod: 'Cash on Delivery',
     isGuestOrder: true,
@@ -98,7 +98,7 @@ const createOrder = async (req, res) => {
     }
 
     const qty = parseInt(quantity) || 1;
-    const unitPrice = 899;
+    const unitPrice = 950;
     const totalPrice = unitPrice * qty;
     const orderId = generateOrderId();
 
@@ -379,7 +379,7 @@ const updateOrder = async (req, res) => {
       if (totalPrice !== undefined && totalPrice !== null) {
         order.totalPrice = Number(totalPrice);
       } else if (quantity !== undefined || unitPrice !== undefined || deliveryCharge !== undefined) {
-        const uPrice = unitPrice !== undefined ? Number(unitPrice) : (order.unitPrice || 899);
+        const uPrice = unitPrice !== undefined ? Number(unitPrice) : (order.unitPrice || 950);
         const qty = quantity !== undefined ? Number(quantity) : (order.quantity || 1);
         const dCharge = deliveryCharge !== undefined ? Number(deliveryCharge) : (order.deliveryCharge || 0);
         order.totalPrice = (uPrice * qty) + dCharge;
@@ -423,7 +423,7 @@ const updateOrder = async (req, res) => {
     if (totalPrice !== undefined && totalPrice !== null) {
       order.totalPrice = Number(totalPrice);
     } else if (quantity !== undefined || unitPrice !== undefined || deliveryCharge !== undefined) {
-      const uPrice = unitPrice !== undefined ? Number(unitPrice) : (order.unitPrice || 899);
+      const uPrice = unitPrice !== undefined ? Number(unitPrice) : (order.unitPrice || 950);
       const qty = quantity !== undefined ? Number(quantity) : (order.quantity || 1);
       const dCharge = deliveryCharge !== undefined ? Number(deliveryCharge) : (order.deliveryCharge || 0);
       order.totalPrice = (uPrice * qty) + dCharge;
@@ -690,9 +690,9 @@ const exportOrdersExcel = async (req, res) => {
       'পণ্য (Product)': o.productName || 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম',
       'পরিমাণ (Quantity)': o.quantity || 1,
       'সাইজ (Size)': o.size || 'স্ট্যান্ডার্ড',
-      'প্রতিটির মূল্য (Unit Price)': o.unitPrice || 899,
+      'প্রতিটির মূল্য (Unit Price)': o.unitPrice || 950,
       'ডেলিভারি চার্জ (Delivery)': o.deliveryCharge || 0,
-      'সর্বমোট মূল্য (Total)': o.totalPrice || 899,
+      'সর্বমোট মূল্য (Total)': o.totalPrice || 950,
       'পেমেন্ট মেথড (Payment)': o.paymentMethod || 'Cash on Delivery',
       'স্ট্যাটাস (Status)': o.status || 'Pending',
       'নোট (Notes)': o.orderNotes || '',
