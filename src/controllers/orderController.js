@@ -157,6 +157,17 @@ const createOrder = async (req, res) => {
     if (getDBStatus().isConnected) {
       order = await Order.create(orderDoc);
       console.log(`[Order Saved in MongoDB Atlas] ID: ${order.orderId}, _id: ${order._id}`);
+
+      // Auto-mark pending incomplete orders with this phone as Converted
+      try {
+        const IncompleteOrder = require('../models/IncompleteOrder');
+        await IncompleteOrder.updateMany(
+          { phoneNumber: cleanPhone, status: { $in: ['Pending', 'Contacted'] } },
+          { $set: { status: 'Converted', convertedOrderId: order.orderId } }
+        );
+      } catch (incErr) {
+        console.warn('[IncompleteOrder Sync Warning]', incErr.message);
+      }
     } else {
       console.warn('[MongoDB Atlas Offline] Saving order in memory fallback');
       order = { ...orderDoc, _id: `ord_${Date.now()}`, createdAt: new Date() };
