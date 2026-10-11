@@ -74,8 +74,13 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Pending', 'Confirmed', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'],
+      enum: ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'],
       default: 'Pending',
+    },
+    ipAddress: {
+      type: String,
+      trim: true,
+      default: '',
     },
     statusHistory: [
       {

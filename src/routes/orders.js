@@ -13,11 +13,15 @@ const {
   getOrderStats,
   exportOrdersExcel,
   exportOrdersCSV,
+  blockIp,
+  unblockIp,
+  getBlockedIps,
 } = require('../controllers/orderController');
 const { protect, adminOnly } = require('../middleware/auth');
+const { orderRateLimiter } = require('../middleware/rateLimiter');
 
 // Public routes
-router.post('/', createOrder);
+router.post('/', orderRateLimiter, createOrder);
 router.get('/track', trackOrder);
 
 // User-auth routes
@@ -26,6 +30,9 @@ router.get('/my', protect, getMyOrders);
 // Admin routes
 router.get('/admin/all', protect, adminOnly, getAllOrders);
 router.get('/admin/stats', protect, adminOnly, getOrderStats);
+router.get('/admin/blocked-ips', protect, adminOnly, getBlockedIps);
+router.post('/admin/block-ip', protect, adminOnly, blockIp);
+router.delete('/admin/block-ip/:ip', protect, adminOnly, unblockIp);
 router.patch('/admin/:id/status', protect, adminOnly, updateOrderStatus);
 router.put('/admin/:id', protect, adminOnly, updateOrder);
 router.delete('/admin/:id/permanent', protect, adminOnly, permanentDeleteOrder);

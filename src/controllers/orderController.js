@@ -1,6 +1,11 @@
 const Order = require('../models/Order');
+const BlockedIp = require('../models/BlockedIp');
+const { getClientIp } = require('../middleware/rateLimiter');
 const { getDBStatus } = require('../config/db');
 const XLSX = require('xlsx');
+
+// In-memory blocked IPs fallback when MongoDB is offline
+const mockBlockedIps = new Set();
 
 // In-memory orders store fallback when MongoDB is offline
 const mockOrders = [
@@ -97,6 +102,23 @@ const createOrder = async (req, res) => {
       });
     }
 
+    const clientIp = getClientIp(req);
+
+    // Check if client IP is blocked
+    let isBlocked = false;
+    if (getDBStatus().isConnected) {
+      isBlocked = await BlockedIp.exists({ ip: clientIp });
+    } else {
+      isBlocked = mockBlockedIps.has(clientIp);
+    }
+
+    if (isBlocked) {
+      return res.status(403).json({
+        success: false,
+        message: 'আপনার আইপি ব্লক করা হয়েছে।',
+      });
+    }
+
     const qty = parseInt(quantity) || 1;
     const unitPrice = 950;
     const totalPrice = unitPrice * qty;
@@ -127,6 +149,7 @@ const createOrder = async (req, res) => {
       userId: validUserId,
       orderNotes: orderNotes ? orderNotes.trim() : '',
       status: 'Pending',
+      ipAddress: clientIp,
       statusHistory: [{ status: 'Pending', changedAt: new Date(), changedBy: 'customer' }],
     };
 
@@ -307,7 +330,7 @@ const getAllOrders = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['Pending', 'Confirmed', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
+    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
     }
@@ -355,7 +378,7 @@ const updateOrder = async (req, res) => {
       orderNotes,
     } = req.body;
 
-    const validStatuses = ['Pending', 'Confirmed', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
+    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
     if (status && !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
     }
@@ -735,6 +758,80 @@ const exportOrdersExcel = async (req, res) => {
   }
 };
 
+// POST /api/orders/admin/block-ip
+const blockIp = async (req, res) => {
+  try {
+    const { ip, reason } = req.body;
+    if (!ip || !ip.trim()) {
+      return res.status(400).json({ success: false, message: 'আইপি অ্যাড্রেস প্রদান করুন।' });
+    }
+    const cleanIp = ip.trim();
+
+    if (getDBStatus().isConnected) {
+      const blockedDoc = await BlockedIp.findOneAndUpdate(
+        { ip: cleanIp },
+        {
+          ip: cleanIp,
+          reason: reason?.trim() || 'Spam / Abuse',
+          blockedBy: req.user?.id || 'admin',
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      return res.json({ success: true, message: `আইপি (${cleanIp}) সফলভাবে ব্লক করা হয়েছে।`, blockedIp: blockedDoc });
+    }
+
+    mockBlockedIps.add(cleanIp);
+    return res.json({ success: true, message: `আইপি (${cleanIp}) সফলভাবে ব্লক করা হয়েছে।` });
+  } catch (err) {
+    console.error('[blockIp Error]', err);
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// DELETE /api/orders/admin/block-ip/:ip
+const unblockIp = async (req, res) => {
+  try {
+    const { ip } = req.params;
+    if (!ip) {
+      return res.status(400).json({ success: false, message: 'আইপি অ্যাড্রেস প্রদান করুন।' });
+    }
+    const cleanIp = decodeURIComponent(ip).trim();
+
+    if (getDBStatus().isConnected) {
+      await BlockedIp.deleteOne({ ip: cleanIp });
+    } else {
+      mockBlockedIps.delete(cleanIp);
+    }
+
+    return res.json({ success: true, message: `আইপি (${cleanIp}) সফলভাবে আনব্লক করা হয়েছে।` });
+  } catch (err) {
+    console.error('[unblockIp Error]', err);
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// GET /api/orders/admin/blocked-ips
+const getBlockedIps = async (req, res) => {
+  try {
+    if (getDBStatus().isConnected) {
+      const blockedIps = await BlockedIp.find().sort({ createdAt: -1 });
+      return res.json({ success: true, blockedIps });
+    }
+
+    const blockedIps = Array.from(mockBlockedIps).map((ip) => ({
+      _id: `mock_ip_${ip}`,
+      ip,
+      reason: 'Spam / Abuse',
+      blockedBy: 'admin',
+      createdAt: new Date().toISOString(),
+    }));
+    return res.json({ success: true, blockedIps });
+  } catch (err) {
+    console.error('[getBlockedIps Error]', err);
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
 module.exports = {
   createOrder,
   trackOrder,
@@ -748,4 +845,8 @@ module.exports = {
   getOrderStats,
   exportOrdersExcel,
   exportOrdersCSV: exportOrdersExcel,
+  blockIp,
+  unblockIp,
+  getBlockedIps,
 };
+
