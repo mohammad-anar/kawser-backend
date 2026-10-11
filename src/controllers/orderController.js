@@ -703,7 +703,17 @@ const exportOrdersExcel = async (req, res) => {
 
     const excelRows = orders.map((o) => ({
       'অর্ডার আইডি (Order ID)': o.orderId || '',
-      'অর্ডারের তারিখ (Date)': o.createdAt ? new Date(o.createdAt).toLocaleString('bn-BD') : '',
+      'অর্ডারের তারিখ ও সময় (Date & Time GMT+6)': o.createdAt
+        ? new Date(o.createdAt).toLocaleString('bn-BD', {
+            timeZone: 'Asia/Dhaka',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+          })
+        : '',
       'গ্রাহকের নাম (Customer)': o.customerName || '',
       'মোবাইল নম্বর (Phone)': o.phoneNumber || '',
       'ইমেইল (Email)': o.email || '',
