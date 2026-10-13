@@ -853,8 +853,136 @@ const getBlockedIps = async (req, res) => {
   }
 };
 
+// POST /api/orders/admin/manual - Admin creates manual order directly
+const createManualOrder = async (req, res) => {
+  try {
+    const {
+      customerName,
+      phoneNumber,
+      email,
+      address,
+      district,
+      thana,
+      productName,
+      quantity,
+      size,
+      unitPrice,
+      deliveryCharge,
+      totalPrice,
+      paymentMethod,
+      status,
+      orderNotes,
+    } = req.body;
+
+    if (!customerName || !phoneNumber || !address) {
+      return res.status(400).json({
+        success: false,
+        message: 'গ্রাহকের নাম, মোবাইল নম্বর এবং সম্পূর্ণ ডেলিভারি ঠিকানা আবশ্যক।',
+      });
+    }
+
+    const cleanPhone = String(phoneNumber).replace(/\s/g, '');
+    const bdPhoneRegex = /^(?:\+88)?01[3-9]\d{8}$/;
+    if (!bdPhoneRegex.test(cleanPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: 'সঠিক বাংলাদেশি ফোন নম্বর দিন (01XXXXXXXXX)।',
+      });
+    }
+
+    const qty = parseInt(quantity) || 1;
+    const uPrice = unitPrice !== undefined ? Number(unitPrice) : 950;
+    const dCharge = deliveryCharge !== undefined ? Number(deliveryCharge) : 0;
+    const computedTotal = totalPrice !== undefined ? Number(totalPrice) : (uPrice * qty + dCharge);
+    const orderId = generateOrderId();
+    const orderStatus = status || 'Pending';
+    const adminUser = req.user ? (req.user.name || req.user.email || 'Admin') : 'Admin';
+
+    const orderDoc = {
+      orderId,
+      customerName: customerName.trim(),
+      phoneNumber: cleanPhone,
+      email: email ? email.trim().toLowerCase() : '',
+      address: address.trim(),
+      district: district ? district.trim() : '',
+      thana: thana ? thana.trim() : '',
+      productName: productName && productName.trim() ? productName.trim() : 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম (Top Notch Reusable)',
+      quantity: qty,
+      size: size ? String(size).trim() : 'স্ট্যান্ডার্ড',
+      unitPrice: uPrice,
+      deliveryCharge: dCharge,
+      totalPrice: computedTotal,
+      paymentMethod: paymentMethod || 'Cash on Delivery',
+      isGuestOrder: false,
+      orderNotes: orderNotes ? orderNotes.trim() : '',
+      status: orderStatus,
+      ipAddress: getClientIp(req),
+      statusHistory: [
+        {
+          status: orderStatus,
+          changedAt: new Date(),
+          changedBy: `Manual (${adminUser})`,
+          note: 'অ্যাডমিন ড্যাশবোর্ড থেকে ম্যানুয়াল তৈরি',
+        },
+      ],
+    };
+
+    let order;
+    if (getDBStatus().isConnected) {
+      order = await Order.create(orderDoc);
+      console.log(`[Manual Order Saved in MongoDB Atlas] ID: ${order.orderId}, _id: ${order._id}`);
+
+      // Auto-mark pending incomplete orders with this phone as Converted
+      try {
+        const IncompleteOrder = require('../models/IncompleteOrder');
+        await IncompleteOrder.updateMany(
+          { phoneNumber: cleanPhone, status: { $in: ['Pending', 'Contacted'] } },
+          { $set: { status: 'Converted', convertedOrderId: order.orderId } }
+        );
+      } catch (incErr) {
+        console.warn('[IncompleteOrder Sync Warning]', incErr.message);
+      }
+    } else {
+      console.warn('[MongoDB Atlas Offline] Saving manual order in memory fallback');
+      order = { ...orderDoc, _id: `ord_${Date.now()}`, createdAt: new Date() };
+      mockOrders.unshift(order);
+    }
+
+    // Real-time WebSocket emission to admin dashboard
+    const io = req.app.get('io');
+    if (io) {
+      const orderPayload = {
+        _id: order._id ? order._id.toString() : `ord_${Date.now()}`,
+        orderId: order.orderId,
+        customerName: order.customerName,
+        phoneNumber: order.phoneNumber,
+        address: order.address,
+        quantity: order.quantity,
+        totalPrice: order.totalPrice,
+        status: order.status,
+        createdAt: order.createdAt || new Date().toISOString(),
+      };
+      io.emit('new_order', orderPayload);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: `ম্যানুয়াল অর্ডার (${order.orderId}) সফলভাবে তৈরি হয়েছে!`,
+      order,
+    });
+  } catch (err) {
+    console.error('[createManualOrder Error]', err);
+    return res.status(500).json({
+      success: false,
+      message: 'সার্ভার ত্রুটি। ম্যানুয়াল অর্ডার তৈরি করতে সমস্যা হয়েছে।',
+      error: err.message,
+    });
+  }
+};
+
 module.exports = {
   createOrder,
+  createManualOrder,
   trackOrder,
   getMyOrders,
   getAllOrders,

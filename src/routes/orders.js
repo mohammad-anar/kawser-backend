@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   createOrder,
+  createManualOrder,
   trackOrder,
   getMyOrders,
   getAllOrders,
@@ -37,6 +38,7 @@ router.get('/my', protect, getMyOrders);
 
 // Admin routes: Standard Orders
 router.get('/admin/all', protect, adminOnly, getAllOrders);
+router.post('/admin/manual', protect, adminOnly, createManualOrder);
 router.get('/admin/stats', protect, adminOnly, getOrderStats);
 router.get('/admin/blocked-ips', protect, adminOnly, getBlockedIps);
 router.post('/admin/block-ip', protect, adminOnly, blockIp);
