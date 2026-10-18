@@ -419,39 +419,45 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
-// PATCH /api/admin/orders/bulk-status - Bulk update status for multiple orders
+// PATCH /api/orders/admin/bulk-status - Bulk update status for multiple orders
 const bulkUpdateOrderStatus = async (req, res) => {
   try {
-    const { orderIds, status } = req.body;
+    const ids = req.body.ids || req.body.orderIds;
+    const { status } = req.body;
     const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
     }
-    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+    if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ success: false, message: 'কমপক্ষে একটি অর্ডার নির্বাচন করুন।' });
     }
 
+    const changedBy = req.user ? (req.user.name || req.user.email || 'admin') : 'admin';
+    const historyEntry = {
+      status,
+      changedAt: new Date(),
+      changedBy,
+    };
+
     if (getDBStatus().isConnected) {
       const isObjectId = (id) => typeof id === 'string' && id.match(/^[0-9a-fA-F]{24}$/);
-      const objectIds = orderIds.filter(isObjectId);
-      const czOrderIds = orderIds.filter((id) => !isObjectId(id));
+      const objectIds = ids.filter(isObjectId);
+      const czOrderIds = ids.filter((id) => !isObjectId(id));
 
       const queryConditions = [];
       if (objectIds.length > 0) queryConditions.push({ _id: { $in: objectIds } });
       if (czOrderIds.length > 0) queryConditions.push({ orderId: { $in: czOrderIds } });
 
-      if (queryConditions.length === 0) {
-        return res.status(400).json({ success: false, message: 'কোনো বৈধ অর্ডার আইডি পাওয়া যায়নি।' });
-      }
+      const filter = queryConditions.length > 0 ? { $or: queryConditions } : { _id: { $in: ids } };
 
-      const orders = await Order.find({ $or: queryConditions });
+      const orders = await Order.find(filter);
       for (const order of orders) {
         order.status = status;
         if (!order.statusHistory) order.statusHistory = [];
         order.statusHistory.push({
           status,
-          changedBy: req.user?.id || 'admin',
-          timestamp: new Date(),
+          changedBy,
+          changedAt: new Date(),
         });
         await order.save();
       }
@@ -459,8 +465,9 @@ const bulkUpdateOrderStatus = async (req, res) => {
       // Socket.io emit if available
       const io = req.app.get('io');
       if (io) {
+        io.emit('bulkStatusUpdated', { ids, status, changedBy });
         io.emit('orders_bulk_status_updated', {
-          orderIds,
+          orderIds: ids,
           status,
           count: orders.length,
         });
@@ -469,6 +476,7 @@ const bulkUpdateOrderStatus = async (req, res) => {
       return res.json({
         success: true,
         message: `${orders.length} টি অর্ডারের স্ট্যাটাস সফলভাবে '${status}' করা হয়েছে।`,
+        modifiedCount: orders.length,
         updatedCount: orders.length,
       });
     }
@@ -476,10 +484,10 @@ const bulkUpdateOrderStatus = async (req, res) => {
     // Mock fallback
     let updatedCount = 0;
     mockOrders.forEach((o) => {
-      if (orderIds.includes(o._id) || orderIds.includes(o.orderId)) {
+      if (ids.includes(o._id) || ids.includes(o.orderId)) {
         o.status = status;
         if (!o.statusHistory) o.statusHistory = [];
-        o.statusHistory.push({ status, changedBy: 'admin', timestamp: new Date() });
+        o.statusHistory.push(historyEntry);
         updatedCount++;
       }
     });
@@ -487,9 +495,11 @@ const bulkUpdateOrderStatus = async (req, res) => {
     return res.json({
       success: true,
       message: `${updatedCount} টি অর্ডারের স্ট্যাটাস সফলভাবে '${status}' করা হয়েছে।`,
+      modifiedCount: updatedCount,
       updatedCount,
     });
   } catch (err) {
+    console.error('[bulkUpdateOrderStatus Error]', err);
     res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
   }
 };
@@ -1203,68 +1213,6 @@ const unblockAllEntities = async (req, res) => {
     });
   } catch (err) {
     console.error('[unblockAllEntities Error]', err);
-    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
-  }
-};
-
-// PATCH /api/orders/admin/bulk-status
-const bulkUpdateOrderStatus = async (req, res) => {
-  try {
-    const { ids, status } = req.body;
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ success: false, message: 'কমপক্ষে একটি অর্ডার সিলেক্ট করুন।' });
-    }
-    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
-    if (!status || !validStatuses.includes(status)) {
-      return res.status(400).json({ success: false, message: 'সঠিক স্ট্যাটাস নির্বাচন করুন।' });
-    }
-
-    const changedBy = req.user ? (req.user.name || req.user.email || 'admin') : 'admin';
-    const historyEntry = {
-      status,
-      changedAt: new Date(),
-      changedBy,
-    };
-
-    if (getDBStatus().isConnected) {
-      const result = await Order.updateMany(
-        { _id: { $in: ids } },
-        {
-          $set: { status },
-          $push: { statusHistory: historyEntry },
-        }
-      );
-
-      const io = req.app.get('io');
-      if (io) {
-        io.emit('bulkStatusUpdated', { ids, status, changedBy });
-      }
-
-      return res.json({
-        success: true,
-        message: `${result.modifiedCount} টি অর্ডারের স্ট্যাটাস '${status}' এ পরিবর্তিত হয়েছে।`,
-        modifiedCount: result.modifiedCount,
-      });
-    }
-
-    // Mock fallback
-    let modifiedCount = 0;
-    mockOrders.forEach((ord) => {
-      if (ids.includes(ord._id)) {
-        ord.status = status;
-        if (!ord.statusHistory) ord.statusHistory = [];
-        ord.statusHistory.push(historyEntry);
-        modifiedCount++;
-      }
-    });
-
-    return res.json({
-      success: true,
-      message: `${modifiedCount} টি অর্ডারের স্ট্যাটাস '${status}' এ পরিবর্তিত হয়েছে।`,
-      modifiedCount,
-    });
-  } catch (err) {
-    console.error('[bulkUpdateOrderStatus Error]', err);
     res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
   }
 };

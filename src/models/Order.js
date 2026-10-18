@@ -108,6 +108,13 @@ const orderSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
+    steadfast: {
+      consignmentId: { type: Number, default: null },
+      trackingCode: { type: String, default: '' },
+      status: { type: String, default: '' },
+      sentAt: { type: Date, default: null },
+      responseMessage: { type: String, default: '' },
+    },
     isDeleted: {
       type: Boolean,
       default: false,
