@@ -1,6 +1,6 @@
 /**
  * Steadfast Courier API Integration Service
- * Documentation: https://portal.steadfast.com.bd/api/v1
+ * Base URLs supported: https://portal.packzy.com/api/v1 (primary live) and https://portal.steadfast.com.bd/api/v1
  */
 
 const getHeaders = () => {
@@ -19,8 +19,52 @@ const getHeaders = () => {
   };
 };
 
+const getBaseUrls = () => {
+  const configured = (process.env.STEADFAST_BASE_URL || '').trim().replace(/\/+$/, '');
+  const urls = [];
+
+  // If user configured portal.packzy.com, put it first
+  if (configured && !configured.includes('portal.steadfast.com.bd')) {
+    urls.push(configured);
+  }
+
+  // Always include portal.packzy.com as the working live server
+  if (!urls.includes('https://portal.packzy.com/api/v1')) {
+    urls.push('https://portal.packzy.com/api/v1');
+  }
+
+  // Also include portal.steadfast.com.bd if anyone needs it
+  if (configured && !urls.includes(configured)) {
+    urls.push(configured);
+  }
+
+  return urls;
+};
+
 const getBaseUrl = () => {
-  return (process.env.STEADFAST_BASE_URL || 'https://portal.steadfast.com.bd/api/v1').replace(/\/+$/, '');
+  return getBaseUrls()[0];
+};
+
+/**
+ * Robust fetch that tries primary base URL and automatically falls back to portal.packzy.com
+ */
+const sfFetch = async (endpoint, options = {}) => {
+  const baseUrls = getBaseUrls();
+  let lastError = null;
+
+  for (const base of baseUrls) {
+    try {
+      const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+      const url = `${base}${cleanEndpoint}`;
+      const res = await fetch(url, options);
+      return res;
+    } catch (err) {
+      lastError = err;
+      // Try next base URL
+    }
+  }
+
+  throw lastError || new Error('Failed to connect to Steadfast Courier API.');
 };
 
 /**
@@ -37,17 +81,19 @@ const createOrder = async (order) => {
     };
   }
 
+  const cleanPhone = String(order.phoneNumber).replace(/\s+/g, '').replace(/^(\+?88)/, '');
+
   const payload = {
     invoice: order.orderId,
     recipient_name: order.customerName,
-    recipient_phone: order.phoneNumber.replace(/\s+/g, ''),
+    recipient_phone: cleanPhone,
     recipient_address: order.address,
     cod_amount: Number(order.totalPrice) || 0,
     note: order.orderNotes || `Size: ${order.size || 'Standard'}, Qty: ${order.quantity || 1}`,
   };
 
   try {
-    const res = await fetch(`${getBaseUrl()}/create_order`, {
+    const res = await sfFetch('/create_order', {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
@@ -61,6 +107,7 @@ const createOrder = async (order) => {
         success: true,
         consignment: data.consignment,
         message: data.message || 'Consignment created successfully.',
+        raw: data,
       };
     }
 
@@ -99,17 +146,20 @@ const createBulkOrders = async (orders) => {
     };
   }
 
-  const dataArray = orders.map((order) => ({
-    invoice: order.orderId,
-    recipient_name: order.customerName,
-    recipient_phone: order.phoneNumber.replace(/\s+/g, ''),
-    recipient_address: order.address,
-    cod_amount: Number(order.totalPrice) || 0,
-    note: order.orderNotes || `Size: ${order.size || 'Standard'}, Qty: ${order.quantity || 1}`,
-  }));
+  const dataArray = orders.map((order) => {
+    const cleanPhone = String(order.phoneNumber).replace(/\s+/g, '').replace(/^(\+?88)/, '');
+    return {
+      invoice: order.orderId,
+      recipient_name: order.customerName,
+      recipient_phone: cleanPhone,
+      recipient_address: order.address,
+      cod_amount: Number(order.totalPrice) || 0,
+      note: order.orderNotes || `Size: ${order.size || 'Standard'}, Qty: ${order.quantity || 1}`,
+    };
+  });
 
   try {
-    const res = await fetch(`${getBaseUrl()}/create_order/bulk-order`, {
+    const res = await sfFetch('/create_order/bulk-order', {
       method: 'POST',
       headers,
       body: JSON.stringify({ data: dataArray }),
@@ -152,7 +202,7 @@ const getStatusByCid = async (cid) => {
   }
 
   try {
-    const res = await fetch(`${getBaseUrl()}/status_by_cid/${cid}`, {
+    const res = await sfFetch(`/status_by_cid/${cid}`, {
       method: 'GET',
       headers,
       signal: AbortSignal.timeout(10000),
@@ -188,7 +238,7 @@ const getStatusByInvoice = async (invoice) => {
   }
 
   try {
-    const res = await fetch(`${getBaseUrl()}/status_by_invoice/${encodeURIComponent(invoice)}`, {
+    const res = await sfFetch(`/status_by_invoice/${encodeURIComponent(invoice)}`, {
       method: 'GET',
       headers,
       signal: AbortSignal.timeout(10000),
@@ -215,7 +265,8 @@ const getStatusByInvoice = async (invoice) => {
 
 /**
  * Check customer fraud score & delivery success history by phone number
- * @param {string} phone - Customer mobile number (11 digits)
+ * Handles both the modern /fraud_check/score/:phone and fallback /fraud_check/:phone
+ * @param {string} phone - Customer mobile number (11 digits, e.g. 017...)
  */
 const checkFraudScore = async (phone) => {
   const headers = getHeaders();
@@ -227,19 +278,25 @@ const checkFraudScore = async (phone) => {
     };
   }
 
-  const cleanPhone = String(phone).replace(/\s+/g, '').replace(/^(\+?88)/, '');
+  // Sanitize phone: keep only digits and remove leading +88 / 88 if present
+  let cleanPhone = String(phone).replace(/\D+/g, '');
+  if (cleanPhone.startsWith('880')) {
+    cleanPhone = cleanPhone.slice(2);
+  } else if (cleanPhone.startsWith('88')) {
+    cleanPhone = cleanPhone.slice(2);
+  }
 
   try {
-    // Try primary fraud_check/score/:phone first as per guide
-    let res = await fetch(`${getBaseUrl()}/fraud_check/score/${cleanPhone}`, {
+    // 1. Try modern /fraud_check/score/:phone endpoint (Active since Sep 2026)
+    let res = await sfFetch(`/fraud_check/score/${cleanPhone}`, {
       method: 'GET',
       headers,
       signal: AbortSignal.timeout(12000),
     });
 
-    // If 404, fallback to /fraud_check/:phone
+    // 2. If 404, fallback to /fraud_check/:phone
     if (res.status === 404) {
-      res = await fetch(`${getBaseUrl()}/fraud_check/${cleanPhone}`, {
+      res = await sfFetch(`/fraud_check/${cleanPhone}`, {
         method: 'GET',
         headers,
         signal: AbortSignal.timeout(12000),
@@ -249,13 +306,28 @@ const checkFraudScore = async (phone) => {
     const data = await res.json().catch(() => null);
 
     if (res.ok && data) {
-      const totalParcels = Number(data.Total_parcels ?? data.total_parcels ?? data.total ?? 0);
-      const delivered = Number(data.total_delivered ?? data.delivered ?? data.success ?? 0);
-      const cancelled = Number(data.total_cancelled ?? data.cancelled ?? data.cancel ?? 0);
+      // Parse modern score fields (delivered_count, cancelled_count, delivery_ratio)
+      // and legacy fields (Total_parcels, total_delivered, total_cancelled)
+      const delivered = Number(data.delivered_count ?? data.total_delivered ?? data.delivered ?? data.success ?? 0);
+      const cancelled = Number(data.cancelled_count ?? data.total_cancelled ?? data.cancelled ?? data.cancel ?? 0);
+      const totalFromCounts = delivered + cancelled;
 
-      const deliveryRate = totalParcels > 0 ? Math.round((delivered / totalParcels) * 100) : null;
+      const totalParcels = totalFromCounts > 0
+        ? totalFromCounts
+        : Number(data.Total_parcels ?? data.total_parcels ?? data.total ?? 0);
+
+      let deliveryRate = null;
+      if (data.delivery_ratio != null) {
+        deliveryRate = Number(data.delivery_ratio);
+      } else if (totalParcels > 0) {
+        deliveryRate = Math.round((delivered / totalParcels) * 100);
+      }
+
+      // Calculate risk level
       let riskLevel = 'unknown';
-      if (totalParcels > 0) {
+      if (data.level) {
+        riskLevel = String(data.level).toLowerCase();
+      } else if (totalParcels > 0 && deliveryRate !== null) {
         if (deliveryRate >= 80) riskLevel = 'low';
         else if (deliveryRate >= 50) riskLevel = 'medium';
         else riskLevel = 'high';
@@ -269,7 +341,11 @@ const checkFraudScore = async (phone) => {
         cancelled,
         deliveryRate,
         riskLevel,
-        fraudReports: data.total_fraud_reports || data.fraud_reports || [],
+        volumeRange: data.volume_range || null,
+        volumeBand: data.volume_band || null,
+        totalReports: Number(data.total_reports ?? (Array.isArray(data.total_fraud_reports) ? data.total_fraud_reports.length : 0)),
+        cancellationRatio: data.cancellation_ratio ?? null,
+        returnRatio: data.return_ratio ?? null,
         raw: data,
       };
     }
