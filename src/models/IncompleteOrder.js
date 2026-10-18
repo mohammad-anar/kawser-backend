@@ -60,6 +60,12 @@ const incompleteOrderSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    deviceId: {
+      type: String,
+      trim: true,
+      default: '',
+      index: true,
+    },
     status: {
       type: String,
       enum: ['Pending', 'Contacted', 'Converted', 'Cancelled'],

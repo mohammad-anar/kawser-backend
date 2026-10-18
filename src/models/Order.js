@@ -82,6 +82,12 @@ const orderSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    deviceId: {
+      type: String,
+      trim: true,
+      default: '',
+      index: true,
+    },
     statusHistory: [
       {
         status: String,
@@ -117,11 +123,31 @@ const orderSchema = new mongoose.Schema(
   }
 );
 
+// Static helper to get next sequential CZ order ID
+orderSchema.statics.generateNextOrderId = async function () {
+  try {
+    const lastCzOrder = await this.findOne({ orderId: /^CZ-\d+$/ })
+      .sort({ orderId: -1 })
+      .collation({ locale: 'en_US', numericOrdering: true });
+
+    let nextNum = 1;
+    if (lastCzOrder && lastCzOrder.orderId) {
+      const match = lastCzOrder.orderId.match(/^CZ-(\d+)$/);
+      if (match) {
+        nextNum = parseInt(match[1], 10) + 1;
+      }
+    }
+    return `CZ-${String(nextNum).padStart(4, '0')}`;
+  } catch (err) {
+    const count = await this.countDocuments();
+    return `CZ-${String(count + 1).padStart(4, '0')}`;
+  }
+};
+
 // Auto-generate orderId before saving
 orderSchema.pre('save', async function (next) {
   if (!this.orderId) {
-    const count = await mongoose.model('Order').countDocuments();
-    this.orderId = `PC-${String(count + 1001).padStart(4, '0')}`;
+    this.orderId = await mongoose.model('Order').generateNextOrderId();
   }
   // Record initial status in history
   if (this.isNew && this.statusHistory.length === 0) {

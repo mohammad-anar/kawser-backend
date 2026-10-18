@@ -1,17 +1,20 @@
 const Order = require('../models/Order');
 const BlockedIp = require('../models/BlockedIp');
+const BlockedEntity = require('../models/BlockedEntity');
 const { getClientIp } = require('../middleware/rateLimiter');
 const { getDBStatus } = require('../config/db');
 const XLSX = require('xlsx');
 
-// In-memory blocked IPs fallback when MongoDB is offline
+// In-memory blocked items fallback when MongoDB is offline
 const mockBlockedIps = new Set();
+const mockBlockedPhones = new Set();
+const mockBlockedDevices = new Set();
 
 // In-memory orders store fallback when MongoDB is offline
 const mockOrders = [
   {
     _id: 'mock_ord_1',
-    orderId: 'PC-1082',
+    orderId: 'CZ-0001',
     customerName: 'তানভীর হাসান',
     phoneNumber: '01711223344',
     email: 'tanvir@gmail.com',
@@ -21,10 +24,10 @@ const mockOrders = [
     gpsCoordinates: { lat: 23.8759, lng: 90.3795 },
     productName: 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম (Top Notch Reusable)',
     quantity: 1,
-    size: 'মিডিয়াম (52mm)',
-    unitPrice: 950,
+    size: '5.7 inch',
+    unitPrice: 1199,
     deliveryCharge: 0,
-    totalPrice: 950,
+    totalPrice: 1199,
     status: 'Confirmed',
     paymentMethod: 'Cash on Delivery',
     isGuestOrder: true,
@@ -36,7 +39,7 @@ const mockOrders = [
   },
   {
     _id: 'mock_ord_2',
-    orderId: 'PC-1085',
+    orderId: 'CZ-0002',
     customerName: 'আরিফুল ইসলাম',
     phoneNumber: '01899887766',
     email: '',
@@ -46,7 +49,7 @@ const mockOrders = [
     gpsCoordinates: { lat: 23.7511, lng: 90.3773 },
     productName: 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম (Top Notch Reusable)',
     quantity: 2,
-    size: 'লার্জ (56mm)',
+    size: '6.7 inch',
     unitPrice: 950,
     deliveryCharge: 0,
     totalPrice: 1900,
@@ -63,10 +66,47 @@ const mockOrders = [
 
 const mongoose = require('mongoose');
 
-// Helper to generate unique order ID
-const generateOrderId = () => {
-  const num = Math.floor(1000 + Math.random() * 9000);
-  return `PC-${num}`;
+// Helper to check if IP, Phone, or Device ID is blocked
+const checkIsBlocked = async ({ ip, phone, deviceId }) => {
+  const cleanIp = ip ? String(ip).trim() : '';
+  const cleanPhone = phone ? String(phone).replace(/\s/g, '') : '';
+  const cleanDev = deviceId ? String(deviceId).trim() : '';
+
+  if (getDBStatus().isConnected) {
+    const conditions = [];
+    if (cleanIp) conditions.push({ type: 'ip', value: cleanIp });
+    if (cleanPhone) conditions.push({ type: 'phone', value: cleanPhone });
+    if (cleanDev) conditions.push({ type: 'device', value: cleanDev });
+
+    if (conditions.length > 0) {
+      const entityBlocked = await BlockedEntity.exists({ $or: conditions });
+      if (entityBlocked) return true;
+    }
+    if (cleanIp) {
+      const ipBlocked = await BlockedIp.exists({ ip: cleanIp });
+      if (ipBlocked) return true;
+    }
+    return false;
+  }
+
+  // Offline fallback
+  if (cleanIp && mockBlockedIps.has(cleanIp)) return true;
+  if (cleanPhone && mockBlockedPhones.has(cleanPhone)) return true;
+  if (cleanDev && mockBlockedDevices.has(cleanDev)) return true;
+  return false;
+};
+
+// Helper to generate unique CZ order ID serially
+const generateOrderId = async () => {
+  if (getDBStatus().isConnected) {
+    try {
+      return await Order.generateNextOrderId();
+    } catch (e) {
+      console.warn('[generateOrderId fallback]', e.message);
+    }
+  }
+  const nextNum = mockOrders.length + 1;
+  return `CZ-${String(nextNum).padStart(4, '0')}`;
 };
 
 // POST /api/orders - Place a new order (guest or authenticated user)
@@ -82,9 +122,11 @@ const createOrder = async (req, res) => {
       gpsCoordinates,
       quantity,
       size,
+      unitPrice: customUnitPrice,
       orderNotes,
       userId,
       productName,
+      deviceId,
     } = req.body;
 
     if (!customerName || !phoneNumber || !address) {
@@ -95,7 +137,8 @@ const createOrder = async (req, res) => {
     }
 
     const bdPhoneRegex = /^(?:\+88)?01[3-9]\d{8}$/;
-    if (!bdPhoneRegex.test(phoneNumber.replace(/\s/g, ''))) {
+    const cleanPhone = phoneNumber.replace(/\s/g, '');
+    if (!bdPhoneRegex.test(cleanPhone)) {
       return res.status(400).json({
         success: false,
         message: 'সঠিক বাংলাদেশি ফোন নম্বর দিন (01XXXXXXXXX)।',
@@ -103,28 +146,35 @@ const createOrder = async (req, res) => {
     }
 
     const clientIp = getClientIp(req);
+    const clientDeviceId = (deviceId && String(deviceId).trim()) || (req.headers['x-device-id'] ? String(req.headers['x-device-id']).trim() : '');
 
-    // Check if client IP is blocked
-    let isBlocked = false;
-    if (getDBStatus().isConnected) {
-      isBlocked = await BlockedIp.exists({ ip: clientIp });
-    } else {
-      isBlocked = mockBlockedIps.has(clientIp);
-    }
+    // Check if client is blocked via IP, Phone, or Device ID
+    const isBlocked = await checkIsBlocked({
+      ip: clientIp,
+      phone: cleanPhone,
+      deviceId: clientDeviceId,
+    });
 
     if (isBlocked) {
       return res.status(403).json({
         success: false,
-        message: 'আপনার আইপি ব্লক করা হয়েছে।',
+        message: 'দুঃখিত, এই মুহূর্তে আপনার অর্ডারটি সম্পন্ন করা সম্ভব হচ্ছে না।',
       });
     }
 
     const qty = parseInt(quantity) || 1;
-    const unitPrice = 950;
+    let unitPrice = 950;
+    const cleanSize = size ? String(size).trim() : '5.7 inch';
+    if (cleanSize.includes('5.7')) {
+      unitPrice = 1199;
+    } else if (cleanSize.includes('6.7') || cleanSize.includes('6.9')) {
+      unitPrice = 950;
+    } else if (customUnitPrice && Number(customUnitPrice) > 0) {
+      unitPrice = Number(customUnitPrice);
+    }
     const totalPrice = unitPrice * qty;
-    const orderId = generateOrderId();
+    const orderId = await generateOrderId();
 
-    const cleanPhone = phoneNumber.replace(/\s/g, '');
     const validUserId = (userId && mongoose.Types.ObjectId.isValid(userId)) ? userId : null;
 
     const orderDoc = {
@@ -140,7 +190,7 @@ const createOrder = async (req, res) => {
         : { lat: null, lng: null },
       productName: (productName && productName.trim()) ? productName.trim() : 'Love Lock Condom / Magic Condom',
       quantity: qty,
-      size: size ? String(size).trim() : 'স্ট্যান্ডার্ড',
+      size: cleanSize,
       unitPrice,
       deliveryCharge: 0,
       totalPrice,
@@ -150,6 +200,7 @@ const createOrder = async (req, res) => {
       orderNotes: orderNotes ? orderNotes.trim() : '',
       status: 'Pending',
       ipAddress: clientIp,
+      deviceId: clientDeviceId,
       statusHistory: [{ status: 'Pending', changedAt: new Date(), changedBy: 'customer' }],
     };
 
@@ -363,6 +414,81 @@ const updateOrderStatus = async (req, res) => {
     order.statusHistory.push({ status, changedBy: 'admin', timestamp: new Date() });
 
     res.json({ success: true, message: 'অর্ডার স্ট্যাটাস আপডেট হয়েছে।', order });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// PATCH /api/admin/orders/bulk-status - Bulk update status for multiple orders
+const bulkUpdateOrderStatus = async (req, res) => {
+  try {
+    const { orderIds, status } = req.body;
+    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
+    }
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'কমপক্ষে একটি অর্ডার নির্বাচন করুন।' });
+    }
+
+    if (getDBStatus().isConnected) {
+      const isObjectId = (id) => typeof id === 'string' && id.match(/^[0-9a-fA-F]{24}$/);
+      const objectIds = orderIds.filter(isObjectId);
+      const czOrderIds = orderIds.filter((id) => !isObjectId(id));
+
+      const queryConditions = [];
+      if (objectIds.length > 0) queryConditions.push({ _id: { $in: objectIds } });
+      if (czOrderIds.length > 0) queryConditions.push({ orderId: { $in: czOrderIds } });
+
+      if (queryConditions.length === 0) {
+        return res.status(400).json({ success: false, message: 'কোনো বৈধ অর্ডার আইডি পাওয়া যায়নি।' });
+      }
+
+      const orders = await Order.find({ $or: queryConditions });
+      for (const order of orders) {
+        order.status = status;
+        if (!order.statusHistory) order.statusHistory = [];
+        order.statusHistory.push({
+          status,
+          changedBy: req.user?.id || 'admin',
+          timestamp: new Date(),
+        });
+        await order.save();
+      }
+
+      // Socket.io emit if available
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('orders_bulk_status_updated', {
+          orderIds,
+          status,
+          count: orders.length,
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: `${orders.length} টি অর্ডারের স্ট্যাটাস সফলভাবে '${status}' করা হয়েছে।`,
+        updatedCount: orders.length,
+      });
+    }
+
+    // Mock fallback
+    let updatedCount = 0;
+    mockOrders.forEach((o) => {
+      if (orderIds.includes(o._id) || orderIds.includes(o.orderId)) {
+        o.status = status;
+        if (!o.statusHistory) o.statusHistory = [];
+        o.statusHistory.push({ status, changedBy: 'admin', timestamp: new Date() });
+        updatedCount++;
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: `${updatedCount} টি অর্ডারের স্ট্যাটাস সফলভাবে '${status}' করা হয়েছে।`,
+      updatedCount,
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
   }
@@ -853,6 +979,296 @@ const getBlockedIps = async (req, res) => {
   }
 };
 
+// GET /api/orders/admin/blocked-entities
+const getBlockedEntities = async (req, res) => {
+  try {
+    if (getDBStatus().isConnected) {
+      const [entities, legacyIps] = await Promise.all([
+        BlockedEntity.find().sort({ createdAt: -1 }),
+        BlockedIp.find().sort({ createdAt: -1 }),
+      ]);
+
+      const allEntities = [...entities];
+      const existingIps = new Set(entities.filter((e) => e.type === 'ip').map((e) => e.value));
+      legacyIps.forEach((lip) => {
+        if (!existingIps.has(lip.ip)) {
+          allEntities.push({
+            _id: lip._id,
+            type: 'ip',
+            value: lip.ip,
+            reason: lip.reason,
+            blockedBy: lip.blockedBy,
+            createdAt: lip.createdAt,
+          });
+        }
+      });
+
+      return res.json({ success: true, entities: allEntities });
+    }
+
+    // Mock fallback
+    const entities = [
+      ...Array.from(mockBlockedIps).map((ip) => ({
+        _id: `mock_ip_${ip}`,
+        type: 'ip',
+        value: ip,
+        reason: 'Spam / Abuse',
+        blockedBy: 'admin',
+        createdAt: new Date(),
+      })),
+      ...Array.from(mockBlockedPhones).map((phone) => ({
+        _id: `mock_phone_${phone}`,
+        type: 'phone',
+        value: phone,
+        reason: 'Spam / Abuse',
+        blockedBy: 'admin',
+        createdAt: new Date(),
+      })),
+      ...Array.from(mockBlockedDevices).map((dev) => ({
+        _id: `mock_dev_${dev}`,
+        type: 'device',
+        value: dev,
+        reason: 'Spam / Abuse',
+        blockedBy: 'admin',
+        createdAt: new Date(),
+      })),
+    ];
+    return res.json({ success: true, entities });
+  } catch (err) {
+    console.error('[getBlockedEntities Error]', err);
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// POST /api/orders/admin/block-entity
+const blockEntity = async (req, res) => {
+  try {
+    const { type, value, reason } = req.body;
+    if (!type || !['ip', 'phone', 'device'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'ব্লকের ধরন (IP, Phone, বা Device) আবশ্যক।' });
+    }
+    if (!value || !String(value).trim()) {
+      return res.status(400).json({ success: false, message: 'ভ্যালু আবশ্যক।' });
+    }
+
+    const cleanValue = type === 'phone' ? String(value).replace(/\s/g, '') : String(value).trim();
+    const blockedBy = req.user ? (req.user.name || req.user.email || 'admin') : 'admin';
+    const cleanReason = reason ? String(reason).trim() : 'স্প্যাম / অযাচিত অর্ডার';
+
+    if (getDBStatus().isConnected) {
+      const doc = await BlockedEntity.findOneAndUpdate(
+        { type, value: cleanValue },
+        { type, value: cleanValue, reason: cleanReason, blockedBy },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      if (type === 'ip') {
+        await BlockedIp.findOneAndUpdate(
+          { ip: cleanValue },
+          { ip: cleanValue, reason: cleanReason, blockedBy },
+          { upsert: true, new: true }
+        ).catch(() => {});
+      }
+      return res.json({ success: true, message: `${type.toUpperCase()} সফলভাবে ব্লক করা হয়েছে।`, entity: doc });
+    }
+
+    if (type === 'ip') mockBlockedIps.add(cleanValue);
+    if (type === 'phone') mockBlockedPhones.add(cleanValue);
+    if (type === 'device') mockBlockedDevices.add(cleanValue);
+
+    return res.json({ success: true, message: `${type.toUpperCase()} সফলভাবে ব্লক করা হয়েছে।` });
+  } catch (err) {
+    console.error('[blockEntity Error]', err);
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// POST /api/orders/admin/unblock-entity
+const unblockEntity = async (req, res) => {
+  try {
+    const { type, value } = req.body;
+    if (!type || !['ip', 'phone', 'device'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'ব্লকের ধরন আবশ্যক।' });
+    }
+    if (!value || !String(value).trim()) {
+      return res.status(400).json({ success: false, message: 'ভ্যালু আবশ্যক।' });
+    }
+
+    const cleanValue = type === 'phone' ? String(value).replace(/\s/g, '') : String(value).trim();
+
+    if (getDBStatus().isConnected) {
+      await BlockedEntity.deleteOne({ type, value: cleanValue });
+      if (type === 'ip') {
+        await BlockedIp.deleteOne({ ip: cleanValue }).catch(() => {});
+      }
+      return res.json({ success: true, message: `${type.toUpperCase()} সফলভাবে আনব্লক করা হয়েছে।` });
+    }
+
+    if (type === 'ip') mockBlockedIps.delete(cleanValue);
+    if (type === 'phone') mockBlockedPhones.delete(cleanValue);
+    if (type === 'device') mockBlockedDevices.delete(cleanValue);
+
+    return res.json({ success: true, message: `${type.toUpperCase()} সফলভাবে আনব্লক করা হয়েছে।` });
+  } catch (err) {
+    console.error('[unblockEntity Error]', err);
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// POST /api/orders/admin/block-all
+const blockAllEntities = async (req, res) => {
+  try {
+    const { ip, phone, deviceId, reason } = req.body;
+    const cleanReason = reason || 'স্প্যাম / অযাচিত অর্ডার';
+    const blockedBy = req.user ? (req.user.name || req.user.email || 'admin') : 'admin';
+
+    const operations = [];
+    if (ip && String(ip).trim()) {
+      operations.push({ type: 'ip', value: String(ip).trim() });
+    }
+    if (phone && String(phone).replace(/\s/g, '')) {
+      operations.push({ type: 'phone', value: String(phone).replace(/\s/g, '') });
+    }
+    if (deviceId && String(deviceId).trim()) {
+      operations.push({ type: 'device', value: String(deviceId).trim() });
+    }
+
+    if (operations.length === 0) {
+      return res.status(400).json({ success: false, message: 'কোনো ব্লকযোগ্য তথ্য পাওয়া যায়নি।' });
+    }
+
+    if (getDBStatus().isConnected) {
+      for (const op of operations) {
+        await BlockedEntity.findOneAndUpdate(
+          { type: op.type, value: op.value },
+          { type: op.type, value: op.value, reason: cleanReason, blockedBy },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        if (op.type === 'ip') {
+          await BlockedIp.findOneAndUpdate(
+            { ip: op.value },
+            { ip: op.value, reason: cleanReason, blockedBy },
+            { upsert: true, new: true }
+          ).catch(() => {});
+        }
+      }
+    } else {
+      operations.forEach((op) => {
+        if (op.type === 'ip') mockBlockedIps.add(op.value);
+        if (op.type === 'phone') mockBlockedPhones.add(op.value);
+        if (op.type === 'device') mockBlockedDevices.add(op.value);
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'আইপি, ফোন নম্বর এবং ডিভাইস আইডি সফলভাবে ব্লক করা হয়েছে।',
+    });
+  } catch (err) {
+    console.error('[blockAllEntities Error]', err);
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// POST /api/orders/admin/unblock-all
+const unblockAllEntities = async (req, res) => {
+  try {
+    const { ip, phone, deviceId } = req.body;
+    const operations = [];
+    if (ip && String(ip).trim()) operations.push({ type: 'ip', value: String(ip).trim() });
+    if (phone && String(phone).replace(/\s/g, '')) operations.push({ type: 'phone', value: String(phone).replace(/\s/g, '') });
+    if (deviceId && String(deviceId).trim()) operations.push({ type: 'device', value: String(deviceId).trim() });
+
+    if (operations.length === 0) {
+      return res.status(400).json({ success: false, message: 'কোনো আনব্লকযোগ্য তথ্য পাওয়া যায়নি।' });
+    }
+
+    if (getDBStatus().isConnected) {
+      for (const op of operations) {
+        await BlockedEntity.deleteOne({ type: op.type, value: op.value });
+        if (op.type === 'ip') {
+          await BlockedIp.deleteOne({ ip: op.value }).catch(() => {});
+        }
+      }
+    } else {
+      operations.forEach((op) => {
+        if (op.type === 'ip') mockBlockedIps.delete(op.value);
+        if (op.type === 'phone') mockBlockedPhones.delete(op.value);
+        if (op.type === 'device') mockBlockedDevices.delete(op.value);
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'আইপি, ফোন নম্বর এবং ডিভাইস আইডি সফলভাবে আনব্লক করা হয়েছে।',
+    });
+  } catch (err) {
+    console.error('[unblockAllEntities Error]', err);
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
+// PATCH /api/orders/admin/bulk-status
+const bulkUpdateOrderStatus = async (req, res) => {
+  try {
+    const { ids, status } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'কমপক্ষে একটি অর্ডার সিলেক্ট করুন।' });
+    }
+    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: 'সঠিক স্ট্যাটাস নির্বাচন করুন।' });
+    }
+
+    const changedBy = req.user ? (req.user.name || req.user.email || 'admin') : 'admin';
+    const historyEntry = {
+      status,
+      changedAt: new Date(),
+      changedBy,
+    };
+
+    if (getDBStatus().isConnected) {
+      const result = await Order.updateMany(
+        { _id: { $in: ids } },
+        {
+          $set: { status },
+          $push: { statusHistory: historyEntry },
+        }
+      );
+
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('bulkStatusUpdated', { ids, status, changedBy });
+      }
+
+      return res.json({
+        success: true,
+        message: `${result.modifiedCount} টি অর্ডারের স্ট্যাটাস '${status}' এ পরিবর্তিত হয়েছে।`,
+        modifiedCount: result.modifiedCount,
+      });
+    }
+
+    // Mock fallback
+    let modifiedCount = 0;
+    mockOrders.forEach((ord) => {
+      if (ids.includes(ord._id)) {
+        ord.status = status;
+        if (!ord.statusHistory) ord.statusHistory = [];
+        ord.statusHistory.push(historyEntry);
+        modifiedCount++;
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: `${modifiedCount} টি অর্ডারের স্ট্যাটাস '${status}' এ পরিবর্তিত হয়েছে।`,
+      modifiedCount,
+    });
+  } catch (err) {
+    console.error('[bulkUpdateOrderStatus Error]', err);
+    res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });
+  }
+};
+
 // POST /api/orders/admin/manual - Admin creates manual order directly
 const createManualOrder = async (req, res) => {
   try {
@@ -894,7 +1310,7 @@ const createManualOrder = async (req, res) => {
     const uPrice = unitPrice !== undefined ? Number(unitPrice) : 950;
     const dCharge = deliveryCharge !== undefined ? Number(deliveryCharge) : 0;
     const computedTotal = totalPrice !== undefined ? Number(totalPrice) : (uPrice * qty + dCharge);
-    const orderId = generateOrderId();
+    const orderId = await generateOrderId();
     const orderStatus = status || 'Pending';
     const adminUser = req.user ? (req.user.name || req.user.email || 'Admin') : 'Admin';
 
@@ -988,6 +1404,7 @@ module.exports = {
   getAllOrders,
   updateOrderStatus,
   updateOrder,
+  bulkUpdateOrderStatus,
   softDeleteOrder,
   restoreOrder,
   permanentDeleteOrder,
@@ -997,5 +1414,10 @@ module.exports = {
   blockIp,
   unblockIp,
   getBlockedIps,
+  getBlockedEntities,
+  blockEntity,
+  unblockEntity,
+  blockAllEntities,
+  unblockAllEntities,
 };
 

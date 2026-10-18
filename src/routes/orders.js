@@ -8,6 +8,7 @@ const {
   getAllOrders,
   updateOrderStatus,
   updateOrder,
+  bulkUpdateOrderStatus,
   softDeleteOrder,
   restoreOrder,
   permanentDeleteOrder,
@@ -17,6 +18,11 @@ const {
   blockIp,
   unblockIp,
   getBlockedIps,
+  getBlockedEntities,
+  blockEntity,
+  unblockEntity,
+  blockAllEntities,
+  unblockAllEntities,
 } = require('../controllers/orderController');
 const {
   recordIncompleteOrder,
@@ -43,6 +49,16 @@ router.get('/admin/stats', protect, adminOnly, getOrderStats);
 router.get('/admin/blocked-ips', protect, adminOnly, getBlockedIps);
 router.post('/admin/block-ip', protect, adminOnly, blockIp);
 router.delete('/admin/block-ip/:ip', protect, adminOnly, unblockIp);
+
+// Admin routes: Entity blocking (IP, Phone, Device ID)
+router.get('/admin/blocked-entities', protect, adminOnly, getBlockedEntities);
+router.post('/admin/block-entity', protect, adminOnly, blockEntity);
+router.post('/admin/unblock-entity', protect, adminOnly, unblockEntity);
+router.post('/admin/block-all', protect, adminOnly, blockAllEntities);
+router.post('/admin/unblock-all', protect, adminOnly, unblockAllEntities);
+
+// Admin routes: Order status & management
+router.patch('/admin/bulk-status', protect, adminOnly, bulkUpdateOrderStatus);
 router.patch('/admin/:id/status', protect, adminOnly, updateOrderStatus);
 router.put('/admin/:id', protect, adminOnly, updateOrder);
 router.delete('/admin/:id/permanent', protect, adminOnly, permanentDeleteOrder);

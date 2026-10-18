@@ -1,15 +1,23 @@
 const IncompleteOrder = require('../models/IncompleteOrder');
 const Order = require('../models/Order');
+const BlockedEntity = require('../models/BlockedEntity');
+const BlockedIp = require('../models/BlockedIp');
 const { getDBStatus } = require('../config/db');
 const { getClientIp } = require('../middleware/rateLimiter');
 
 // In-memory fallback when MongoDB is offline
 const mockIncompleteOrders = [];
 
-// Helper to generate unique order ID
-const generateOrderId = () => {
-  const num = Math.floor(1000 + Math.random() * 9000);
-  return `PC-${num}`;
+// Helper to generate unique CZ order ID
+const generateOrderId = async () => {
+  if (getDBStatus().isConnected) {
+    try {
+      return await Order.generateNextOrderId();
+    } catch (e) {
+      console.warn('[generateOrderId fallback]', e.message);
+    }
+  }
+  return `CZ-${String(mockIncompleteOrders.length + 1).padStart(4, '0')}`;
 };
 
 // POST /api/orders/incomplete - Public endpoint to record abandoned / incomplete orders
@@ -26,6 +34,7 @@ const recordIncompleteOrder = async (req, res) => {
       quantity,
       size,
       totalPrice,
+      deviceId,
     } = req.body;
 
     if (!customerName || !phoneNumber) {
@@ -44,11 +53,45 @@ const recordIncompleteOrder = async (req, res) => {
     }
 
     const clientIp = getClientIp(req);
-    const qty = parseInt(quantity) || 1;
-    const unitPrice = 950;
-    const computedTotal = totalPrice ? Number(totalPrice) : unitPrice * qty;
-
+    const clientDeviceId = (deviceId && String(deviceId).trim()) || (req.headers['x-device-id'] ? String(req.headers['x-device-id']).trim() : '');
     const isConnected = getDBStatus().isConnected;
+
+    // Check if client is blocked
+    if (isConnected) {
+      const conditions = [];
+      if (clientIp) conditions.push({ type: 'ip', value: clientIp });
+      if (cleanPhone) conditions.push({ type: 'phone', value: cleanPhone });
+      if (clientDeviceId) conditions.push({ type: 'device', value: clientDeviceId });
+
+      if (conditions.length > 0) {
+        const isBlocked = await BlockedEntity.exists({ $or: conditions });
+        if (isBlocked) {
+          return res.status(403).json({
+            success: false,
+            message: 'দুঃখিত, এই মুহূর্তে আপনার অর্ডারটি সম্পন্ন করা সম্ভব হচ্ছে না।',
+          });
+        }
+      }
+      if (clientIp) {
+        const ipBlocked = await BlockedIp.exists({ ip: clientIp });
+        if (ipBlocked) {
+          return res.status(403).json({
+            success: false,
+            message: 'দুঃখিত, এই মুহূর্তে আপনার অর্ডারটি সম্পন্ন করা সম্ভব হচ্ছে না।',
+          });
+        }
+      }
+    }
+
+    const qty = parseInt(quantity) || 1;
+    const cleanSize = size ? String(size).trim() : '5.7 inch';
+    let unitPrice = 950;
+    if (cleanSize.includes('5.7')) {
+      unitPrice = 1199;
+    } else if (cleanSize.includes('6.7') || cleanSize.includes('6.9')) {
+      unitPrice = 950;
+    }
+    const computedTotal = totalPrice ? Number(totalPrice) : unitPrice * qty;
 
     // Check if customer has previous confirmed/placed orders
     let previousOrdersCount = 0;
@@ -70,10 +113,11 @@ const recordIncompleteOrder = async (req, res) => {
       thana: thana ? thana.trim() : '',
       productName: productName || 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম (Top Notch Reusable)',
       quantity: qty,
-      size: size ? String(size).trim() : 'স্ট্যান্ডার্ড',
+      size: cleanSize,
       unitPrice,
       totalPrice: computedTotal,
       ipAddress: clientIp,
+      deviceId: clientDeviceId,
       status: 'Pending',
       hasPreviousOrders,
       previousOrdersCount,
@@ -335,7 +379,7 @@ const convertIncompleteOrder = async (req, res) => {
     const uPrice = unitPrice !== undefined ? Number(unitPrice) : (incomplete.unitPrice || 950);
     const dCharge = deliveryCharge !== undefined ? Number(deliveryCharge) : 0;
     const finalTotal = totalPrice !== undefined ? Number(totalPrice) : (uPrice * qty + dCharge);
-    const orderId = generateOrderId();
+    const orderId = await generateOrderId();
 
     const orderDoc = {
       orderId,
@@ -346,7 +390,7 @@ const convertIncompleteOrder = async (req, res) => {
       thana: thana?.trim() || incomplete.thana || '',
       productName: productName?.trim() || incomplete.productName || 'Love Lock Condom / Magic Condom',
       quantity: qty,
-      size: size?.trim() || incomplete.size || 'স্ট্যান্ডার্ড',
+      size: size?.trim() || incomplete.size || '5.7 inch',
       unitPrice: uPrice,
       deliveryCharge: dCharge,
       totalPrice: finalTotal,
@@ -355,6 +399,7 @@ const convertIncompleteOrder = async (req, res) => {
       orderNotes: orderNotes ? orderNotes.trim() : `অসম্পূর্ণ অর্ডার থেকে কনভার্ট করা হয়েছে (${id})`,
       status: 'Confirmed',
       ipAddress: incomplete.ipAddress || '',
+      deviceId: incomplete.deviceId || '',
       statusHistory: [
         {
           status: 'Confirmed',
