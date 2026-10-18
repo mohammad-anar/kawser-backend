@@ -163,13 +163,9 @@ const createOrder = async (req, res) => {
     }
 
     const qty = parseInt(quantity) || 1;
-    let unitPrice = 950;
-    const cleanSize = size ? String(size).trim() : '5.7 inch';
-    if (cleanSize.includes('5.7')) {
-      unitPrice = 1199;
-    } else if (cleanSize.includes('6.7') || cleanSize.includes('6.9')) {
-      unitPrice = 950;
-    } else if (customUnitPrice && Number(customUnitPrice) > 0) {
+    const cleanSize = (size && (String(size).includes('5.7') || String(size).includes('৫.৭'))) ? '5.7 inch' : '6.7 inch';
+    let unitPrice = cleanSize === '5.7 inch' ? 1199 : 950;
+    if (customUnitPrice && Number(customUnitPrice) > 0) {
       unitPrice = Number(customUnitPrice);
     }
     const totalPrice = unitPrice * qty;
@@ -320,7 +316,7 @@ const getMyOrders = async (req, res) => {
 // GET /api/admin/orders
 const getAllOrders = async (req, res) => {
   try {
-    const { status, search, phone, isDeleted, page = 1, limit = 10 } = req.query;
+    const { status, search, phone, size, isDeleted, page = 1, limit = 10 } = req.query;
     const parsedPage = Math.max(1, parseInt(page) || 1);
     const parsedLimit = Math.max(1, parseInt(limit) || 10);
     const isDeletedQuery = isDeleted === 'true';
@@ -330,6 +326,14 @@ const getAllOrders = async (req, res) => {
       if (status && status !== 'all') query.status = status;
       if (phone) {
         query.phoneNumber = { $regex: phone.trim(), $options: 'i' };
+      }
+      if (size && size !== 'all') {
+        const clean = String(size).trim();
+        if (clean.includes('5.7') || clean.includes('৫.৭')) {
+          query.size = { $regex: '5\\.7|৫\\.৭', $options: 'i' };
+        } else {
+          query.size = { $regex: '6\\.7|৬\\.৭', $options: 'i' };
+        }
       }
       if (search) {
         query.$or = [
@@ -361,6 +365,18 @@ const getAllOrders = async (req, res) => {
     }
     if (phone) {
       filtered = filtered.filter((o) => o.phoneNumber && o.phoneNumber.includes(phone.trim()));
+    }
+    if (size && size !== 'all') {
+      const clean = String(size).trim();
+      if (clean.includes('5.7') || clean.includes('৫.৭')) {
+        filtered = filtered.filter(
+          (o) => o.size && (o.size.includes('5.7') || o.size.includes('৫.৭'))
+        );
+      } else {
+        filtered = filtered.filter(
+          (o) => !o.size || o.size.includes('6.7') || o.size.includes('৬.৭')
+        );
+      }
     }
     if (search) {
       const q = search.toLowerCase().trim();
@@ -542,7 +558,9 @@ const updateOrder = async (req, res) => {
       if (thana !== undefined) order.thana = thana.trim();
       if (productName !== undefined) order.productName = productName.trim();
       if (quantity !== undefined) order.quantity = Number(quantity) || 1;
-      if (size !== undefined) order.size = size;
+      if (size !== undefined) {
+        order.size = (String(size).includes('5.7') || String(size).includes('৫.৭')) ? '5.7 inch' : '6.7 inch';
+      }
       if (unitPrice !== undefined) order.unitPrice = Number(unitPrice);
       if (deliveryCharge !== undefined) order.deliveryCharge = Number(deliveryCharge);
 
@@ -586,7 +604,9 @@ const updateOrder = async (req, res) => {
     if (thana !== undefined) order.thana = thana.trim();
     if (productName !== undefined) order.productName = productName.trim();
     if (quantity !== undefined) order.quantity = Number(quantity) || 1;
-    if (size !== undefined) order.size = size;
+    if (size !== undefined) {
+      order.size = (String(size).includes('5.7') || String(size).includes('৫.৭')) ? '5.7 inch' : '6.7 inch';
+    }
     if (unitPrice !== undefined) order.unitPrice = Number(unitPrice);
     if (deliveryCharge !== undefined) order.deliveryCharge = Number(deliveryCharge);
 
@@ -815,7 +835,7 @@ const getOrderStats = async (req, res) => {
 // POST /api/admin/orders/export - Export Excel (.xlsx) / Google Sheets format
 const exportOrdersExcel = async (req, res) => {
   try {
-    const { ids, status, isDeleted } = req.body;
+    const { ids, status, isDeleted, size } = req.body;
     let orders = [];
 
     const isDeletedFilter = isDeleted === true ? true : { $ne: true };
@@ -835,16 +855,40 @@ const exportOrdersExcel = async (req, res) => {
             },
           ],
         };
-      } else if (status && status !== 'all') {
-        query.status = status;
+      } else {
+        if (status && status !== 'all') {
+          query.status = status;
+        }
+        if (size && size !== 'all') {
+          const clean = String(size).trim();
+          if (clean.includes('5.7') || clean.includes('৫.৭')) {
+            query.size = { $regex: '5\\.7|৫\\.৭', $options: 'i' };
+          } else {
+            query.size = { $regex: '6\\.7|৬\\.৭', $options: 'i' };
+          }
+        }
       }
       orders = await Order.find(query).sort({ createdAt: -1 }).lean();
     } else {
       orders = mockOrders.filter((o) => (isDeleted === true ? o.isDeleted === true : !o.isDeleted));
       if (ids && ids.length > 0) {
         orders = orders.filter((o) => ids.includes(o._id) || ids.includes(o.orderId));
-      } else if (status && status !== 'all') {
-        orders = orders.filter((o) => o.status === status);
+      } else {
+        if (status && status !== 'all') {
+          orders = orders.filter((o) => o.status === status);
+        }
+        if (size && size !== 'all') {
+          const clean = String(size).trim();
+          if (clean.includes('5.7') || clean.includes('৫.৭')) {
+            orders = orders.filter(
+              (o) => o.size && (o.size.includes('5.7') || o.size.includes('৫.৭'))
+            );
+          } else {
+            orders = orders.filter(
+              (o) => !o.size || o.size.includes('6.7') || o.size.includes('৬.৭')
+            );
+          }
+        }
       }
     }
 
@@ -869,7 +913,7 @@ const exportOrdersExcel = async (req, res) => {
       'থানা (Thana)': o.thana || '',
       'পণ্য (Product)': o.productName || 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম',
       'পরিমাণ (Quantity)': o.quantity || 1,
-      'সাইজ (Size)': o.size || 'স্ট্যান্ডার্ড',
+      'সাইজ (Size)': (o.size && (o.size.includes('5.7') || o.size.includes('৫.৭'))) ? '৫.৭ ইঞ্চি (5.7 inch)' : '৬.৭ ইঞ্চি (6.7 inch)',
       'প্রতিটির মূল্য (Unit Price)': o.unitPrice || 950,
       'ডেলিভারি চার্জ (Delivery)': o.deliveryCharge || 0,
       'সর্বমোট মূল্য (Total)': o.totalPrice || 950,
@@ -1272,7 +1316,7 @@ const createManualOrder = async (req, res) => {
       thana: thana ? thana.trim() : '',
       productName: productName && productName.trim() ? productName.trim() : 'চীন ড্রাগন সিলিকন ম্যাজিক কনডম (Top Notch Reusable)',
       quantity: qty,
-      size: size ? String(size).trim() : 'স্ট্যান্ডার্ড',
+      size: (size && (String(size).includes('5.7') || String(size).includes('৫.৭'))) ? '5.7 inch' : '6.7 inch',
       unitPrice: uPrice,
       deliveryCharge: dCharge,
       totalPrice: computedTotal,

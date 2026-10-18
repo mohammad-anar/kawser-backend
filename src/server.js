@@ -81,6 +81,24 @@ connectDB().then(async () => {
       if (res.modifiedCount > 0) {
         console.log(`[Order Schema Sync] Updated ${res.modifiedCount} legacy orders with isDeleted: false`);
       }
+
+      // Automatically migrate any order whose size is not 5.7 inch to 6.7 inch
+      const sizeMigration = await Order.updateMany(
+        { size: { $not: { $regex: '5\\.7|৫\\.৭', $options: 'i' } } },
+        { $set: { size: '6.7 inch' } }
+      );
+      if (sizeMigration.modifiedCount > 0) {
+        console.log(`[Order Schema Sync] Migrated ${sizeMigration.modifiedCount} legacy/standard orders to 6.7 inch`);
+      }
+
+      const IncompleteOrder = require('./models/IncompleteOrder');
+      const incSizeMigration = await IncompleteOrder.updateMany(
+        { size: { $not: { $regex: '5\\.7|৫\\.৭', $options: 'i' } } },
+        { $set: { size: '6.7 inch' } }
+      );
+      if (incSizeMigration.modifiedCount > 0) {
+        console.log(`[Order Schema Sync] Migrated ${incSizeMigration.modifiedCount} legacy/standard incomplete orders to 6.7 inch`);
+      }
     } catch (e) {
       console.warn('[Order Schema Sync] Non-critical warning:', e.message);
     }

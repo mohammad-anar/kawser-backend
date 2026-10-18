@@ -84,13 +84,8 @@ const recordIncompleteOrder = async (req, res) => {
     }
 
     const qty = parseInt(quantity) || 1;
-    const cleanSize = size ? String(size).trim() : '5.7 inch';
-    let unitPrice = 950;
-    if (cleanSize.includes('5.7')) {
-      unitPrice = 1199;
-    } else if (cleanSize.includes('6.7') || cleanSize.includes('6.9')) {
-      unitPrice = 950;
-    }
+    const cleanSize = (size && (String(size).includes('5.7') || String(size).includes('৫.৭'))) ? '5.7 inch' : '6.7 inch';
+    const unitPrice = cleanSize === '5.7 inch' ? 1199 : 950;
     const computedTotal = totalPrice ? Number(totalPrice) : unitPrice * qty;
 
     // Check if customer has previous confirmed/placed orders
@@ -204,7 +199,7 @@ const recordIncompleteOrder = async (req, res) => {
 // GET /api/orders/admin/incomplete - Protected Admin list
 const getIncompleteOrders = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search, status } = req.query;
+    const { page = 1, limit = 10, search, status, size } = req.query;
     const parsedPage = parseInt(page) || 1;
     const parsedLimit = parseInt(limit) || 10;
     const skip = (parsedPage - 1) * parsedLimit;
@@ -214,6 +209,15 @@ const getIncompleteOrders = async (req, res) => {
 
       if (status && status !== 'all') {
         query.status = status;
+      }
+
+      if (size && size !== 'all') {
+        const clean = String(size).trim();
+        if (clean.includes('5.7') || clean.includes('৫.৭')) {
+          query.size = { $regex: '5\\.7|৫\\.৭', $options: 'i' };
+        } else {
+          query.size = { $regex: '6\\.7|৬\\.৭', $options: 'i' };
+        }
       }
 
       if (search && search.trim()) {
@@ -257,6 +261,18 @@ const getIncompleteOrders = async (req, res) => {
     let filtered = [...mockIncompleteOrders];
     if (status && status !== 'all') {
       filtered = filtered.filter((o) => o.status === status);
+    }
+    if (size && size !== 'all') {
+      const clean = String(size).trim();
+      if (clean.includes('5.7') || clean.includes('৫.৭')) {
+        filtered = filtered.filter(
+          (o) => o.size && (o.size.includes('5.7') || o.size.includes('৫.৭'))
+        );
+      } else {
+        filtered = filtered.filter(
+          (o) => !o.size || o.size.includes('6.7') || o.size.includes('৬.৭')
+        );
+      }
     }
     if (search && search.trim()) {
       const s = search.trim().toLowerCase();
@@ -390,7 +406,7 @@ const convertIncompleteOrder = async (req, res) => {
       thana: thana?.trim() || incomplete.thana || '',
       productName: productName?.trim() || incomplete.productName || 'Love Lock Condom / Magic Condom',
       quantity: qty,
-      size: size?.trim() || incomplete.size || '5.7 inch',
+      size: (size && (String(size).includes('5.7') || String(size).includes('৫.৭'))) ? '5.7 inch' : '6.7 inch',
       unitPrice: uPrice,
       deliveryCharge: dCharge,
       totalPrice: finalTotal,

@@ -45,7 +45,7 @@ const incompleteOrderSchema = new mongoose.Schema(
     size: {
       type: String,
       trim: true,
-      default: 'স্ট্যান্ডার্ড',
+      default: '6.7 inch',
     },
     unitPrice: {
       type: Number,
