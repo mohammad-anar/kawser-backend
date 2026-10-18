@@ -37,15 +37,15 @@ const createTransporter = () => {
 };
 
 /** Sends a 6-digit OTP email */
-const sendOtpEmail = async (to, otp, subject = 'আপনার OTP কোড — SelfCare Solution') => {
+const sendOtpEmail = async (to, otp, subject = 'আপনার OTP কোড — CareZone BD') => {
   const transporter = createTransporter();
   await transporter.sendMail({
-    from: process.env.EMAIL_FROM || 'SelfCare Solution <noreply@selfcaresolution.com>',
+    from: process.env.EMAIL_FROM || 'CareZone BD <noreply@carezonebd.store>',
     to,
     subject,
     html: `
       <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;background:#0d0d1e;border-radius:16px;color:#fff;border:1px solid #eab30840;">
-        <h2 style="color:#eab308;margin-bottom:8px;">SelfCare Solution</h2>
+        <h2 style="color:#eab308;margin-bottom:8px;">CareZone BD</h2>
         <p style="color:#9ca3af;font-size:14px;">আপনার পাসওয়ার্ড পরিবর্তনের OTP কোড:</p>
         <div style="background:#1a1a2e;border:2px solid #eab30860;border-radius:12px;padding:24px;text-align:center;margin:24px 0;">
           <span style="font-size:40px;font-weight:900;letter-spacing:12px;color:#eab308;">${otp}</span>
@@ -185,7 +185,7 @@ const forgotPassword = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     try {
-      await sendOtpEmail(user.email, otp, 'পাসওয়ার্ড রিসেট OTP — SelfCare Solution');
+      await sendOtpEmail(user.email, otp, 'পাসওয়ার্ড রিসেট OTP — CareZone BD');
     } catch (emailErr) {
       console.error('[Email Error]', emailErr.message);
       // Reset the OTP fields if email failed
@@ -320,7 +320,7 @@ const sendChangePasswordOtp = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     try {
-      await sendOtpEmail(user.email, otp, 'পাসওয়ার্ড পরিবর্তন OTP — SelfCare Solution');
+      await sendOtpEmail(user.email, otp, 'পাসওয়ার্ড পরিবর্তন OTP — CareZone BD');
     } catch (emailErr) {
       console.error('[Email Error]', emailErr.message);
       user.passwordResetOtp = undefined;
