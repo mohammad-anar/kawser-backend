@@ -140,6 +140,8 @@ app.get('/api', (req, res) => {
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/steadfast', require('./routes/steadfast'));
+app.use('/api/ai', require('./routes/ai'));
+
 
 // Health check
 app.get('/api/health', (req, res) => {

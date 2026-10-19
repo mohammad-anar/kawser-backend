@@ -89,7 +89,7 @@ const createOrder = async (order) => {
     recipient_phone: cleanPhone,
     recipient_address: order.address,
     cod_amount: Number(order.totalPrice) || 0,
-    note: order.orderNotes || `Size: ${order.size || '6.7 inch'}, Qty: ${order.quantity || 1}`,
+    note: order.orderNotes || '',
   };
 
   try {
@@ -154,7 +154,7 @@ const createBulkOrders = async (orders) => {
       recipient_phone: cleanPhone,
       recipient_address: order.address,
       cod_amount: Number(order.totalPrice) || 0,
-      note: order.orderNotes || `Size: ${order.size || '6.7 inch'}, Qty: ${order.quantity || 1}`,
+      note: order.orderNotes || '',
     };
   });
 
