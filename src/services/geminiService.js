@@ -22,12 +22,47 @@ const getClient = () => {
  * Returns: { customerName, phoneNumber, address, amount, orderNotes }
  */
 const parseOrderText = async (rawText) => {
+  // Helper for fast local regex / line-based parsing
+  const localFallbackParse = (text) => {
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    const result = {
+      customerName: '',
+      phoneNumber: '',
+      address: '',
+      amount: 0,
+      orderNotes: '',
+    };
+
+    const noteLine = lines.find((l) => /^(note|নোট)\s*:/i.test(l));
+    if (noteLine) {
+      result.orderNotes = noteLine.replace(/^(note|নোট)\s*:\s*/i, '').trim();
+    }
+
+    const mainLines = lines.filter((l) => !/^(note|নোট)\s*:/i.test(l));
+    if (mainLines[0]) result.customerName = mainLines[0];
+    if (mainLines[1]) {
+      const normalizedDigits = mainLines[1].replace(/[০-৯]/g, (d) => String(d.charCodeAt(0) - 0x09e6));
+      result.phoneNumber = normalizedDigits.replace(/\D/g, '').replace(/^880/, '0').replace(/^88/, '');
+    }
+    if (mainLines[2]) result.address = mainLines[2];
+    if (mainLines[3]) {
+      const normalizedDigits = mainLines[3].replace(/[০-৯]/g, (d) => String(d.charCodeAt(0) - 0x09e6));
+      const amountNum = parseFloat(normalizedDigits.replace(/[^\d.]/g, ''));
+      if (!isNaN(amountNum) && amountNum > 0) result.amount = amountNum;
+    }
+
+    return result;
+  };
+
   const client = getClient();
+
   if (!client) {
+    const fallbackData = localFallbackParse(rawText);
     return {
-      success: false,
-      isConfigMissing: true,
-      message: 'GEMINI_API_KEY is not configured in backend .env',
+      success: true,
+      data: fallbackData,
+      isFallback: true,
+      message: 'GEMINI_API_KEY is not configured or placeholder in .env. Parsed with local parser.',
     };
   }
 
@@ -57,32 +92,54 @@ ${rawText}
 """
 `.trim();
 
-  try {
-    const model = client.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text().trim();
+  // Model priority: try newest and pro models first
+  const MODEL_CANDIDATES = [
+    'gemini-2.0-flash',
+    'gemini-1.5-pro',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-pro-latest',
+    'gemini-pro',
+  ];
 
-    // Strip markdown code fences if present
-    const cleaned = responseText.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  let lastErr = null;
 
-    const parsed = JSON.parse(cleaned);
+  for (const modelName of MODEL_CANDIDATES) {
+    try {
+      const model = client.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      const responseText = result.response.text().trim();
+      const cleaned = responseText.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+      const parsed = JSON.parse(cleaned);
 
-    return {
-      success: true,
-      data: {
-        customerName: parsed.customerName || '',
-        phoneNumber: String(parsed.phoneNumber || '').replace(/\D/g, '').replace(/^880/, '').replace(/^88/, ''),
-        address: parsed.address || '',
-        amount: Number(parsed.amount) || 0,
-        orderNotes: parsed.orderNotes || '',
-      },
-    };
-  } catch (err) {
-    return {
-      success: false,
-      message: `Gemini parse error: ${err.message}`,
-    };
+      return {
+        success: true,
+        data: {
+          customerName: parsed.customerName || '',
+          phoneNumber: String(parsed.phoneNumber || '').replace(/\D/g, '').replace(/^880/, '0').replace(/^88/, ''),
+          address: parsed.address || '',
+          amount: Number(parsed.amount) || 0,
+          orderNotes: parsed.orderNotes || '',
+        },
+      };
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message || '');
+      // If model not found or invalid or 404, try next candidate
+      if (msg.includes('404') || msg.includes('not found') || msg.includes('not supported') || msg.includes('400')) {
+        continue;
+      }
+      break;
+    }
   }
+
+  // If all Gemini models failed (e.g. invalid key / quota / 404), fall back to local parser so user is NEVER blocked!
+  const fallbackData = localFallbackParse(rawText);
+  return {
+    success: true,
+    data: fallbackData,
+    isFallback: true,
+    message: `Gemini parsing unavailable (${lastErr?.message}). Parsed with local parser.`,
+  };
 };
 
 module.exports = { parseOrderText };
