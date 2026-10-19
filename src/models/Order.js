@@ -114,6 +114,8 @@ const orderSchema = new mongoose.Schema(
       status: { type: String, default: '' },
       sentAt: { type: Date, default: null },
       responseMessage: { type: String, default: '' },
+      sentCount: { type: Number, default: 0 },
+      lastInvoiceSent: { type: String, default: '' },
     },
     isDeleted: {
       type: Boolean,

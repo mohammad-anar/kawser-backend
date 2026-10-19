@@ -53,8 +53,8 @@ const sendOrderToSteadfast = async (req, res) => {
       responseMessage: sfRes.message || 'Consignment created',
     };
 
-    // If order was in Pending, move to Processing
-    if (order.status === 'Pending') {
+    // If order was in Pending, Cancelled, or Hold, move to Processing
+    if (['Pending', 'Cancelled', 'Hold'].includes(order.status)) {
       order.status = 'Processing';
       if (!order.statusHistory) order.statusHistory = [];
       order.statusHistory.push({
@@ -148,7 +148,7 @@ const sendBulkOrdersToSteadfast = async (req, res) => {
             sentAt: new Date(),
             responseMessage: sfBulkRes.message || 'Bulk submitted',
           };
-          if (order.status === 'Pending') {
+          if (['Pending', 'Cancelled', 'Hold'].includes(order.status)) {
             order.status = 'Processing';
             if (!order.statusHistory) order.statusHistory = [];
             order.statusHistory.push({
@@ -171,6 +171,15 @@ const sendBulkOrdersToSteadfast = async (req, res) => {
               sentAt: new Date(),
               responseMessage: singleRes.message,
             };
+            if (['Pending', 'Cancelled', 'Hold'].includes(order.status)) {
+              order.status = 'Processing';
+              if (!order.statusHistory) order.statusHistory = [];
+              order.statusHistory.push({
+                status: 'Processing',
+                changedBy: req.user?.id || 'admin',
+                changedAt: new Date(),
+              });
+            }
             if (getDBStatus().isConnected) await order.save();
             updatedOrders.push(order);
             successCount++;
@@ -191,7 +200,7 @@ const sendBulkOrdersToSteadfast = async (req, res) => {
             sentAt: new Date(),
             responseMessage: singleRes.message,
           };
-          if (order.status === 'Pending') {
+          if (['Pending', 'Cancelled', 'Hold'].includes(order.status)) {
             order.status = 'Processing';
             if (!order.statusHistory) order.statusHistory = [];
             order.statusHistory.push({

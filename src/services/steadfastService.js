@@ -107,6 +107,7 @@ const createOrder = async (order) => {
         success: true,
         consignment: data.consignment,
         message: data.message || 'Consignment created successfully.',
+        invoiceSent: order.orderId,
         raw: data,
       };
     }
