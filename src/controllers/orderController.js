@@ -408,7 +408,7 @@ const getAllOrders = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
+    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Partial Delivered', 'Cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
     }
@@ -420,6 +420,19 @@ const updateOrderStatus = async (req, res) => {
       order.status = status;
       order.statusHistory.push({ status, changedBy: req.user?.id || 'admin' });
       await order.save();
+
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('order_status_updated', {
+          orderId: order.orderId,
+          _id: order._id,
+          newStatus: status,
+          customerName: order.customerName,
+          source: req.user?.name || req.user?.email || 'Admin Panel',
+          updatedAt: new Date(),
+        });
+      }
+
       return res.json({ success: true, message: 'অর্ডার স্ট্যাটাস আপডেট হয়েছে।', order });
     }
 
@@ -428,6 +441,18 @@ const updateOrderStatus = async (req, res) => {
 
     order.status = status;
     order.statusHistory.push({ status, changedBy: 'admin', timestamp: new Date() });
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('order_status_updated', {
+        orderId: order.orderId,
+        _id: order._id,
+        newStatus: status,
+        customerName: order.customerName,
+        source: 'Admin Panel',
+        updatedAt: new Date(),
+      });
+    }
 
     res.json({ success: true, message: 'অর্ডার স্ট্যাটাস আপডেট হয়েছে।', order });
   } catch (err) {
@@ -440,7 +465,7 @@ const bulkUpdateOrderStatus = async (req, res) => {
   try {
     const ids = req.body.ids || req.body.orderIds;
     const { status } = req.body;
-    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
+    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Partial Delivered', 'Cancelled'];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
     }
@@ -541,7 +566,7 @@ const updateOrder = async (req, res) => {
       orderNotes,
     } = req.body;
 
-    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Cancelled'];
+    const validStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Partial Delivered', 'Cancelled'];
     if (status && !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'অবৈধ স্ট্যাটাস।' });
     }
@@ -576,7 +601,8 @@ const updateOrder = async (req, res) => {
       if (paymentMethod !== undefined) order.paymentMethod = paymentMethod;
       if (orderNotes !== undefined) order.orderNotes = orderNotes;
 
-      if (status && status !== order.status) {
+      const statusChanged = Boolean(status && status !== order.status);
+      if (statusChanged) {
         order.status = status;
         order.statusHistory.push({
           status,
@@ -586,6 +612,21 @@ const updateOrder = async (req, res) => {
       }
 
       await order.save();
+
+      if (statusChanged) {
+        const io = req.app.get('io');
+        if (io) {
+          io.emit('order_status_updated', {
+            orderId: order.orderId,
+            _id: order._id,
+            newStatus: status,
+            customerName: order.customerName,
+            source: req.user?.name || req.user?.email || 'Admin Panel',
+            updatedAt: new Date(),
+          });
+        }
+      }
+
       return res.json({ success: true, message: 'অর্ডার সফলভাবে আপডেট করা হয়েছে।', order });
     }
 
@@ -622,7 +663,8 @@ const updateOrder = async (req, res) => {
     if (paymentMethod !== undefined) order.paymentMethod = paymentMethod;
     if (orderNotes !== undefined) order.orderNotes = orderNotes;
 
-    if (status && status !== order.status) {
+    const mockStatusChanged = Boolean(status && status !== order.status);
+    if (mockStatusChanged) {
       order.status = status;
       if (!order.statusHistory) order.statusHistory = [];
       order.statusHistory.push({
@@ -633,6 +675,21 @@ const updateOrder = async (req, res) => {
     }
 
     mockOrders[orderIndex] = order;
+
+    if (mockStatusChanged) {
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('order_status_updated', {
+          orderId: order.orderId,
+          _id: order._id,
+          newStatus: status,
+          customerName: order.customerName,
+          source: 'Admin Panel',
+          updatedAt: new Date(),
+        });
+      }
+    }
+
     return res.json({ success: true, message: 'অর্ডার সফলভাবে আপডেট করা হয়েছে।', order });
   } catch (err) {
     res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি।', error: err.message });

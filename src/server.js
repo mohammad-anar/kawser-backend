@@ -142,6 +142,16 @@ app.use('/api/orders', require('./routes/orders'));
 app.use('/api/steadfast', require('./routes/steadfast'));
 app.use('/api/ai', require('./routes/ai'));
 
+// Top-level aliases for Steadfast Webhook (supports both /steadfast/webhook and /api/steadfast/webhook)
+app.post('/steadfast/webhook', require('./controllers/steadfastController').handleSteadfastWebhook);
+app.get('/steadfast/webhook', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Steadfast Webhook endpoint is active and listening for POST requests.',
+    hasTokenConfigured: !!process.env.STEADFAST_WEBHOOK_TOKEN,
+  });
+});
+
 
 // Health check
 app.get('/api/health', (req, res) => {

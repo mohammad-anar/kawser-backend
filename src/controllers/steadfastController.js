@@ -307,10 +307,169 @@ const checkCustomerFraudScore = async (req, res) => {
   }
 };
 
+// POST /api/steadfast/webhook - Steadfast Webhook for automatic order status updates
+const handleSteadfastWebhook = async (req, res) => {
+  try {
+    // 1. Verify Optional Auth Token / Signature from Steadfast
+    const expectedToken = process.env.STEADFAST_WEBHOOK_TOKEN;
+    if (expectedToken) {
+      const authHeader = req.headers['authorization'] || '';
+      const xSignature = req.headers['x-signature'] || '';
+      const providedToken = authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
+        : authHeader.trim() || xSignature.trim();
+
+      if (providedToken && providedToken !== expectedToken.trim()) {
+        console.warn('[Steadfast Webhook] Unauthorized request. Token mismatch:', providedToken);
+        return res.status(401).json({ success: false, message: 'Unauthorized: Invalid token' });
+      }
+    }
+
+    const payload = req.body || {};
+    console.log('[Steadfast Webhook Received]', JSON.stringify(payload));
+
+    // Support all possible payload structures from Steadfast
+    const invoice = payload.invoice || payload.data?.invoice || payload.order_id || payload.data?.order_id;
+    const consignmentId = payload.consignment_id || payload.data?.consignment_id || payload.cid;
+    const trackingCode = payload.tracking_code || payload.data?.tracking_code;
+    const sfStatus = (payload.status || payload.delivery_status || payload.data?.status || payload.data?.delivery_status || '').toLowerCase().trim();
+
+    if (!invoice && !consignmentId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing invoice or consignment_id in webhook payload',
+      });
+    }
+
+    let order = null;
+    if (getDBStatus().isConnected) {
+      const queryOr = [];
+      if (invoice) {
+        queryOr.push({ orderId: invoice });
+        if (typeof invoice === 'string' && invoice.match(/^[0-9a-fA-F]{24}$/)) {
+          queryOr.push({ _id: invoice });
+        }
+      }
+      if (consignmentId) {
+        queryOr.push({ 'steadfast.consignmentId': Number(consignmentId) || consignmentId });
+      }
+      if (trackingCode) {
+        queryOr.push({ 'steadfast.trackingCode': trackingCode });
+      }
+
+      order = await Order.findOne({ $or: queryOr });
+    }
+
+    if (!order) {
+      console.warn(`[Steadfast Webhook] Order not found for invoice=${invoice}, consignmentId=${consignmentId}`);
+      // Respond 200 so Steadfast webhook delivery is acknowledged
+      return res.status(200).json({
+        success: true,
+        message: 'Webhook acknowledged. Order not found in database.',
+      });
+    }
+
+    // Map Steadfast courier status to Website order status enum:
+    // 'delivered', 'delivered_approval_pending' -> 'Delivered'
+    // 'partial_delivered', 'partial_delivered_approval_pending' -> 'Partial Delivered'
+    // 'cancelled', 'cancelled_approval_pending' -> 'Cancelled'
+    // 'hold' -> 'Hold'
+    // 'in_transit', 'picked', 'out_for_delivery' -> 'Shipped'
+    // 'in_review', 'pending' -> 'Processing'
+    const validAppStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Partial Delivered', 'Cancelled'];
+
+    const mapStatus = (statusStr) => {
+      const s = String(statusStr || '').toLowerCase().trim();
+      if (!s) return null;
+      if (s === 'partial_delivered' || s.includes('partial')) return 'Partial Delivered';
+      if (s === 'delivered' || s === 'delivered_approval_pending') return 'Delivered';
+      if (s === 'cancelled' || s === 'cancelled_approval_pending') return 'Cancelled';
+      if (s === 'hold') return 'Hold';
+      if (s === 'in_transit' || s.includes('transit') || s.includes('out_for_delivery') || s.includes('picked') || s.includes('rider')) {
+        return 'Shipped';
+      }
+      if (s === 'in_review' || s === 'pending' || s.includes('approval_pending')) {
+        return 'Processing';
+      }
+      const directMatch = validAppStatuses.find((v) => v.toLowerCase() === s);
+      if (directMatch) return directMatch;
+      return null;
+    };
+
+    const targetAppStatus = mapStatus(sfStatus);
+
+    // Update Steadfast object
+    if (!order.steadfast) order.steadfast = {};
+    order.steadfast.status = sfStatus || order.steadfast.status;
+    if (consignmentId && !order.steadfast.consignmentId) {
+      order.steadfast.consignmentId = Number(consignmentId) || consignmentId;
+    }
+    if (trackingCode && !order.steadfast.trackingCode) {
+      order.steadfast.trackingCode = trackingCode;
+    }
+
+    // Update website order status if mapped and different
+    let statusChanged = false;
+    if (targetAppStatus && order.status !== targetAppStatus) {
+      const oldStatus = order.status;
+      order.status = targetAppStatus;
+      if (!order.statusHistory) order.statusHistory = [];
+      order.statusHistory.push({
+        status: targetAppStatus,
+        changedBy: 'Steadfast Webhook',
+        changedAt: new Date(),
+      });
+      statusChanged = true;
+      console.log(`[Steadfast Webhook] Order ${order.orderId} status changed from "${oldStatus}" to "${targetAppStatus}"`);
+    }
+
+    if (getDBStatus().isConnected) {
+      await order.save();
+    }
+
+    // Emit real-time Socket.io notification for admin dashboard
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('order_status_updated', {
+        orderId: order.orderId,
+        _id: order._id,
+        newStatus: order.status,
+        customerName: order.customerName,
+        source: 'Steadfast Courier',
+        steadfastStatus: sfStatus,
+        statusChanged,
+        updatedAt: new Date(),
+      });
+      io.emit('orders_bulk_status_updated', {
+        orderIds: [order._id],
+        status: order.status,
+        count: 1,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Order ${order.orderId} status updated successfully`,
+      orderId: order.orderId,
+      status: order.status,
+      steadfastStatus: sfStatus,
+      statusChanged,
+    });
+  } catch (err) {
+    console.error('[Steadfast Webhook Error]', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to process webhook',
+      error: err.message,
+    });
+  }
+};
+
 module.exports = {
   getConfigStatus,
   sendOrderToSteadfast,
   sendBulkOrdersToSteadfast,
   checkSteadfastStatus,
   checkCustomerFraudScore,
+  handleSteadfastWebhook,
 };
