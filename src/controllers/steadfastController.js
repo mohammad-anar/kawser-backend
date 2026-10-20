@@ -53,8 +53,8 @@ const sendOrderToSteadfast = async (req, res) => {
       responseMessage: sfRes.message || 'Consignment created',
     };
 
-    // If order was in Pending, Cancelled, or Hold, move to Processing
-    if (['Pending', 'Cancelled', 'Hold'].includes(order.status)) {
+    // If order was in Pending, Cancelled, Hold, Returned, or Manual, move to Processing
+    if (['Pending', 'Cancelled', 'Hold', 'Returned', 'Manual'].includes(order.status)) {
       order.status = 'Processing';
       if (!order.statusHistory) order.statusHistory = [];
       order.statusHistory.push({
@@ -148,7 +148,7 @@ const sendBulkOrdersToSteadfast = async (req, res) => {
             sentAt: new Date(),
             responseMessage: sfBulkRes.message || 'Bulk submitted',
           };
-          if (['Pending', 'Cancelled', 'Hold'].includes(order.status)) {
+          if (['Pending', 'Cancelled', 'Hold', 'Returned', 'Manual'].includes(order.status)) {
             order.status = 'Processing';
             if (!order.statusHistory) order.statusHistory = [];
             order.statusHistory.push({
@@ -171,7 +171,7 @@ const sendBulkOrdersToSteadfast = async (req, res) => {
               sentAt: new Date(),
               responseMessage: singleRes.message,
             };
-            if (['Pending', 'Cancelled', 'Hold'].includes(order.status)) {
+            if (['Pending', 'Cancelled', 'Hold', 'Returned', 'Manual'].includes(order.status)) {
               order.status = 'Processing';
               if (!order.statusHistory) order.statusHistory = [];
               order.statusHistory.push({
@@ -200,7 +200,7 @@ const sendBulkOrdersToSteadfast = async (req, res) => {
             sentAt: new Date(),
             responseMessage: singleRes.message,
           };
-          if (['Pending', 'Cancelled', 'Hold'].includes(order.status)) {
+          if (['Pending', 'Cancelled', 'Hold', 'Returned', 'Manual'].includes(order.status)) {
             order.status = 'Processing';
             if (!order.statusHistory) order.statusHistory = [];
             order.statusHistory.push({
@@ -408,17 +408,20 @@ const handleSteadfastWebhook = async (req, res) => {
     // Map Steadfast courier status to Website order status enum:
     // 'delivered', 'delivered_approval_pending' -> 'Delivered'
     // 'partial_delivered', 'partial_delivered_approval_pending' -> 'Partial Delivered'
+    // 'returned', 'return', 'return_*' -> 'Returned'  (checked BEFORE cancel to avoid false match)
     // 'cancelled', 'cancelled_approval_pending', 'deleted' -> 'Cancelled'
     // 'hold' -> 'Hold'
     // 'in_transit', 'picked', 'out_for_delivery' -> 'Shipped'
     // 'in_review', 'pending' -> 'Processing'
-    const validAppStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Partial Delivered', 'Cancelled'];
+    const validAppStatuses = ['Pending', 'Confirmed', 'Scheduled', 'Processing', 'Hold', 'Shipped', 'Delivered', 'Partial Delivered', 'Cancelled', 'Returned', 'Manual'];
 
     const mapStatus = (statusStr) => {
       const s = String(statusStr || '').toLowerCase().trim();
       if (!s) return null;
       if (s === 'partial_delivered' || s.includes('partial')) return 'Partial Delivered';
       if (s === 'delivered' || s === 'delivered_approval_pending') return 'Delivered';
+      // 'returned' must be checked before the cancel block because 'return' could match cancel's includes test
+      if (s === 'returned' || s === 'return' || s.startsWith('return')) return 'Returned';
       if (
         s === 'cancelled' ||
         s.includes('cancel') ||
