@@ -4,6 +4,7 @@ const BlockedEntity = require('../models/BlockedEntity');
 const { getClientIp } = require('../middleware/rateLimiter');
 const { getDBStatus } = require('../config/db');
 const XLSX = require('xlsx');
+const metaCapiService = require('../services/metaCapiService');
 
 // In-memory blocked items fallback when MongoDB is offline
 const mockBlockedIps = new Set();
@@ -240,6 +241,11 @@ const createOrder = async (req, res) => {
       io.emit('new_order', orderPayload);
       console.log(`[Socket.io] Broadcasted 'new_order' event: ${order.orderId} - ৳${order.totalPrice}`);
     }
+
+    // Trigger Meta Conversions API (Server-Side CAPI) for Purchase Event with Deduplication
+    metaCapiService.sendPurchaseEvent(order, req).catch((capiErr) => {
+      console.warn('[Meta CAPI background notice]', capiErr.message);
+    });
 
     res.status(201).json({
       success: true,
