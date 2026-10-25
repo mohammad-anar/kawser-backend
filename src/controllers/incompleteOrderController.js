@@ -85,7 +85,7 @@ const recordIncompleteOrder = async (req, res) => {
 
     const qty = parseInt(quantity) || 1;
     const cleanSize = (size && (String(size).includes('5.7') || String(size).includes('৫.৭'))) ? '5.7 inch' : '6.7 inch';
-    const unitPrice = cleanSize === '5.7 inch' ? 1199 : 950;
+    const unitPrice = cleanSize === '5.7 inch' ? 1199 : 899;
     const computedTotal = totalPrice ? Number(totalPrice) : unitPrice * qty;
 
     // Check if customer has previous confirmed/placed orders
@@ -392,7 +392,7 @@ const convertIncompleteOrder = async (req, res) => {
     }
 
     const qty = Number(quantity) || incomplete.quantity || 1;
-    const uPrice = unitPrice !== undefined ? Number(unitPrice) : (incomplete.unitPrice || 950);
+    const uPrice = unitPrice !== undefined ? Number(unitPrice) : (incomplete.unitPrice || 899);
     const dCharge = deliveryCharge !== undefined ? Number(deliveryCharge) : 0;
     const finalTotal = totalPrice !== undefined ? Number(totalPrice) : (uPrice * qty + dCharge);
     const orderId = await generateOrderId();

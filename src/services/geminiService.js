@@ -176,8 +176,8 @@ TRAINING RULES & FIELD GUIDELINES:
    - If "p2" or "6.7" or "৬.৭" is present in text -> size MUST be "6.7 inch"
    - If "p1" is present, OR if "p2" is NOT present in text -> size MUST be "5.7 inch" (Default size is 5.7 inch)
 2. Product Amount / Price:
-   - Product price is typically 3 digits or under 1500 BDT (e.g. 950, 900, 1000, 1200, 850).
-   - Look for "প্রাইজ: ৯৫০", "প্রাইজ:৯০০ টাকা", "price:900", "950 taka", "৯৫০ টাকা", "900", "৯৫০".
+   - Product price is typically 3 digits or under 1500 BDT (e.g. 899, 950, 900, 1000, 1200, 850).
+   - Look for "প্রাইজ: ৮৯৯", "প্রাইজ: ৯৫০", "প্রাইজ:৯০০ টাকা", "price:899", "899 taka", "৮৯৯ টাকা", "900", "৮৯৯".
    - CRITICAL: Never mistake an 11-digit mobile number for price!
 3. Mobile Number:
    - 11 digits or more (starting with 01, e.g. 01710087271 or ০১৯২৭০২৮৬৭৪).

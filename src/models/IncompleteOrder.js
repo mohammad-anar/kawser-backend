@@ -49,11 +49,11 @@ const incompleteOrderSchema = new mongoose.Schema(
     },
     unitPrice: {
       type: Number,
-      default: 950,
+      default: 899,
     },
     totalPrice: {
       type: Number,
-      default: 950,
+      default: 899,
     },
     ipAddress: {
       type: String,
