@@ -1366,7 +1366,7 @@ const createManualOrder = async (req, res) => {
     const dCharge = deliveryCharge !== undefined ? Number(deliveryCharge) : 0;
     const computedTotal = totalPrice !== undefined ? Number(totalPrice) : (uPrice * qty + dCharge);
     const orderId = await generateOrderId();
-    const orderStatus = status || 'Pending';
+    const orderStatus = status || 'Manual';
     const adminUser = req.user ? (req.user.name || req.user.email || 'Admin') : 'Admin';
 
     const orderDoc = {
