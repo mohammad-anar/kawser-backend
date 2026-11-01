@@ -13,9 +13,12 @@ const PORT = process.env.PORT || 5000;
 
 // Allowed CORS Origins
 const allowedOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:3000',
+  process.env.CLIENT_URL || 'https://www.carezonebd.site',
+  'https://www.carezonebd.site',
+  'https://carezonebd.site',
+  'https://api.carezonebd.site',
+  'http://localhost:3000',
   'http://localhost:3001',
-  'https://personalcarebd.com',
 ];
 
 // Socket.io Setup
