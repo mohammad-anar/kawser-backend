@@ -13,10 +13,10 @@ const PORT = process.env.PORT || 5000;
 
 // Allowed CORS Origins
 const allowedOrigins = [
-  process.env.CLIENT_URL || 'https://www.carezonebd.site',
-  'https://www.carezonebd.site',
-  'https://carezonebd.site',
-  'https://api.carezonebd.site',
+  process.env.CLIENT_URL || 'https://www.carezonebd.tech',
+  'https://www.carezonebd.tech',
+  'https://carezonebd.tech',
+  'https://api.carezonebd.tech',
   'http://localhost:3000',
   'http://localhost:3001',
 ];
@@ -24,17 +24,11 @@ const allowedOrigins = [
 // Socket.io Setup
 const io = new Server(server, {
   cors: {
-    origin: (origin, callback) => {
-      // Allow requests with no origin (e.g. mobile apps, curl) or allowed origins
-      if (!origin || allowedOrigins.includes(origin) || origin.includes('localhost')) {
-        callback(null, true);
-      } else {
-        callback(null, true); // Permissive in dev/staging
-      }
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    credentials: true,
+    origin: '*',
+    methods: ['GET', 'POST'],
   },
+  transports: ['polling', 'websocket'],
+  allowEIO3: true,
 });
 
 // Attach io to Express app for use inside route handlers / controllers
