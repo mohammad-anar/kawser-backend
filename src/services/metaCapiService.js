@@ -34,7 +34,7 @@ function formatBdPhoneForMeta(phone) {
  * @param {Object} req - Express request object for IP and User-Agent
  */
 async function sendPurchaseEvent(order, req = {}) {
-  const pixelId = process.env.META_PIXEL_ID || '1090280990042152';
+  const pixelId = process.env.META_PIXEL_ID || '995456930309440';
   const accessToken = process.env.META_ACCESS_TOKEN;
   const testEventCode =
     (req.headers && req.headers['x-meta-test-code']) ||
